@@ -150,7 +150,6 @@ def gpio_process() -> None:
                         )
                     case LineSettings.Encoder:
                         pass
-
             sleep(0.05)
 
 
@@ -267,3 +266,5 @@ if __name__ == "__main__":
     p2 = Process(target=print_process)
     p1.start()
     p2.start()
+    p1.join()
+    p2.join()
