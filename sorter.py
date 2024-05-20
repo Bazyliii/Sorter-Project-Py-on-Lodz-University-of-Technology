@@ -21,9 +21,9 @@ class Identifier(Enum):
     Enumerator of elements that can be connected to GPIO pins.
     """
 
-    Button: int = 0
-    Encoder: int = 1
-    Sensor: int = 2
+    Button = 0
+    Encoder = 1
+    Sensor = 2
 
 
 class LineSettings:
@@ -97,8 +97,9 @@ class LineSettings:
 
 
 # Tuple of GPIO elements
-GPIO_ELEMENTS: tuple[LineSettings] = (LineSettings(2, Identifier.Button),
-                                      LineSettings(3, Identifier.Button))
+GPIO_ELEMENTS: tuple = (LineSettings(2, Identifier.Button),
+                        LineSettings(3, Identifier.Button),
+                        LineSettings(4, Identifier.Button))
 # GPIO chip adress
 CHIP: str = "/dev/gpiochip4"
 # Number of inputs and outputs
@@ -159,7 +160,7 @@ def openCV_process() -> None:
 
 def robot_control_process() -> None:
     """
-    Process that controls the Kawasaki robot..
+    Process that controls the Kawasaki robot.
     """
     print("Robot control process started!")
     pass
