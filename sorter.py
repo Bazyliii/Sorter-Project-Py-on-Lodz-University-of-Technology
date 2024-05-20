@@ -42,7 +42,7 @@ class LineSettings:
         Initializes a new instance of the LineSettings class.
         ## Args:
            - pin (int): The pin number.
-           - direction (gpioDirection, optional): The pin direction. Defaults to gpioDirection.AS_IS.
+           - identifier (Identifier): Identifier of a element connected to the pin.
         ## Returns:
             None
         """
@@ -70,7 +70,7 @@ class LineSettings:
             case Identifier.Sensor:
                 return gpio.LineSettings()
             case _:
-                return gpio.LineSettings()
+                raise Exception("Invalid identifier!")
 
     def return_identifier(self) -> Identifier:
         """
@@ -97,8 +97,8 @@ class LineSettings:
 
 
 # Tuple of GPIO elements
-GPIO_ELEMENTS: tuple[LineSettings] = (LineSettings(pin=2, identifier=Identifier.Button),
-                                      LineSettings(pin=3, identifier=Identifier.Button))
+GPIO_ELEMENTS: tuple[LineSettings] = (LineSettings(2, Identifier.Button),
+                                      LineSettings(3, Identifier.Button))
 # GPIO chip adress
 CHIP: str = "/dev/gpiochip4"
 # Number of inputs and outputs
