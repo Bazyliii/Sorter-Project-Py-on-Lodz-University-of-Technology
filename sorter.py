@@ -95,11 +95,10 @@ class LineSettings:
         return self.pin
 
 
-BUTTON_1: LineSettings = LineSettings(pin=2, identifier=Identifier.Button)
-BUTTON_2: LineSettings = LineSettings(pin=3, identifier=Identifier.Button)
 
-# List of GPIO elements
-GPIO_ELEMENTS: list[LineSettings] = [BUTTON_1, BUTTON_2]
+# Tuple of GPIO elements
+GPIO_ELEMENTS: tuple[LineSettings] = (LineSettings(pin=2, identifier=Identifier.Button),
+                                      LineSettings(pin=3, identifier=Identifier.Button))
 # GPIO chip adress
 CHIP: str = "/dev/gpiochip4"
 # Number of inputs and outputs
@@ -113,11 +112,11 @@ gpio_input_values: SynchronizedArray = mpArray("i", [0] * INPUTS_COUNT)
 def gpio_value_to_numeric(value: gpioValue) -> int:
     """
     ## Quick summary:
-    Converts the GPIO value to a numeric value.
+    Converts the GPIO state to a numeric value.
     ## Args:
-        value (gpioValue): The GPIO value.
+        value (gpioValue): The GPIO state.
     ## Returns:
-        numeric_value (int): The numeric value.
+        numeric_value (int): The numeric value of that state.
     """
     match value:
         case gpioValue.ACTIVE:
