@@ -1,5 +1,6 @@
 # Imports
 from dataclasses import dataclass
+from enum import Enum
 from multiprocessing import Process, Value as mpValue, Array as mpArray
 from multiprocessing.sharedctypes import SynchronizedArray
 from rpi_hardware_pwm import HardwarePWM
@@ -14,24 +15,27 @@ from gpiod.line import (
 )
 
 
+class Identifier(Enum):
+    """
+    ## Quick summary:
+    Enumerator of elements that can be connected to GPIO pins.
+    """
+
+    Button: int = 0
+    Encoder: int = 1
+    Sensor: int = 2
+
+
 class LineSettings:
     """
     ## Quick summary:
     A class that represents a GPIO line settings.
     """
 
-    Button: int = 0
-    Encoder: int = 1
-
     def __init__(
         self,
         pin: int,
-        identifier: int,
-        direction: gpioDirection = gpioDirection.AS_IS,
-        edge_detection: gpioEdge = gpioEdge.NONE,
-        bias: gpioBias = gpioBias.AS_IS,
-        output_value: gpioValue = gpioValue.INACTIVE,
-        debounce_period: timedelta = timedelta(),
+        identifier: Identifier,
     ) -> None:
         """
         ## Quick summary:
@@ -39,20 +43,11 @@ class LineSettings:
         ## Args:
            - pin (int): The pin number.
            - direction (gpioDirection, optional): The pin direction. Defaults to gpioDirection.AS_IS.
-           - edge_detection (gpioEdge, optional): The pin edge detection. Defaults to gpioEdge.NONE.
-           - bias (gpioBias, optional): The pin bias. Defaults to gpioBias.AS_IS.
-           - output_value (gpioValue, optional): The pin output value. Defaults to gpioValue.INACTIVE.
-           - debounce_period (timedelta, optional): The pin debounce period. Defaults to timedelta().
         ## Returns:
             None
         """
         self.pin: int = pin
-        self.direction: gpioDirection = direction
-        self.edge_detection: gpioEdge = edge_detection
-        self.bias: gpioBias = bias
-        self.output_value: gpioValue = output_value
-        self.debounce_period: timedelta = debounce_period
-        self.identifier: int = identifier
+        self.identifier: Identifier = identifier
 
     def return_settings(self) -> gpio.LineSettings:
         """
@@ -63,15 +58,29 @@ class LineSettings:
         ## Returns:
             settings (gpio.LineSettings): The line settings.
         """
-        return gpio.LineSettings(
-            direction=self.direction,
-            edge_detection=self.edge_detection,
-            bias=self.bias,
-            output_value=self.output_value,
-            debounce_period=self.debounce_period,
-        )
+        match self.identifier:
+            case Identifier.Button:
+                return gpio.LineSettings(
+                    edge_detection=gpioEdge.BOTH,
+                    bias=gpioBias.PULL_UP,
+                    debounce_period=timedelta(milliseconds=10),
+                )
+            case Identifier.Encoder:
+                return gpio.LineSettings()
+            case Identifier.Sensor:
+                return gpio.LineSettings()
+            case _:
+                return gpio.LineSettings()
 
-    def return_identifier(self) -> int:
+    def return_identifier(self) -> Identifier:
+        """
+        ## Quick summary:
+        Returns the identifier.
+        ## Args:
+            None
+        ## Returns:
+            identifier (int): The identifier.
+        """
         return self.identifier
 
     def return_pin(self) -> int:
@@ -86,20 +95,8 @@ class LineSettings:
         return self.pin
 
 
-BUTTON_1: LineSettings = LineSettings(
-    pin=2,
-    identifier=LineSettings.Button,
-    edge_detection=gpioEdge.BOTH,
-    bias=gpioBias.PULL_UP,
-    debounce_period=timedelta(milliseconds=10),
-)
-BUTTON_2: LineSettings = LineSettings(
-    pin=3,
-    identifier=LineSettings.Button,
-    edge_detection=gpioEdge.BOTH,
-    bias=gpioBias.PULL_UP,
-    debounce_period=timedelta(milliseconds=10),
-)
+BUTTON_1: LineSettings = LineSettings(pin=2, identifier=Identifier.Button)
+BUTTON_2: LineSettings = LineSettings(pin=3, identifier=Identifier.Button)
 
 # List of GPIO elements
 GPIO_ELEMENTS: list[LineSettings] = [BUTTON_1, BUTTON_2]
@@ -144,11 +141,11 @@ def gpio_process() -> None:
         while True:
             for index, elem in enumerate(GPIO_ELEMENTS):
                 match elem.return_identifier():
-                    case LineSettings.Button:
+                    case Identifier.Button:
                         gpio_output_values[index] = gpio_value_to_numeric(
                             request.get_value(elem.return_pin())
                         )
-                    case LineSettings.Encoder:
+                    case Identifier.Encoder:
                         pass
             sleep(0.05)
 
