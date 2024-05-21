@@ -32,74 +32,89 @@ class LineSettings:
     A class that represents a GPIO line settings.
     """
 
-    def __init__(
-        self,
-        pin: int,
-        identifier: Identifier,
-    ) -> None:
-        """
-        ## Quick summary:
-        Initializes a new instance of the LineSettings class.
-        ## Args:
-           - pin (int): The pin number.
-           - identifier (Identifier): Identifier of a element connected to the pin.
-        ## Returns:
-            None
-        """
-        self.pin: int = pin
-        self.identifier: Identifier = identifier
+    class Button:
+        identifier = Identifier.Button
+        def __init__(
+            self,
+            pin: int,
+        ) -> None:
+            """
+            ## Quick summary:
+            Initializes a new instance of the LineSettings class.
+            ## Args:
+            - pin (int): The pin number.
+            - identifier (Identifier): Identifier of a element connected to the pin.
+            ## Returns:
+                None
+            """
+            self.pin: int = pin
 
-    def return_settings(self) -> gpio.LineSettings:
-        """
-        ## Quick summary:
-        Returns the line settings.
-        ## Args:
-            None
-        ## Returns:
-            settings (gpio.LineSettings): The line settings.
-        """
-        match self.identifier:
-            case Identifier.Button:
-                return gpio.LineSettings(
-                    edge_detection=gpioEdge.BOTH,
-                    bias=gpioBias.PULL_UP,
-                    debounce_period=timedelta(milliseconds=10),
-                )
-            case Identifier.Encoder:
-                return gpio.LineSettings()
-            case Identifier.Sensor:
-                return gpio.LineSettings()
-            case _:
-                raise Exception("Invalid identifier!")
+        def return_settings(self) -> tuple:
+            """
+            ## Quick summary:
+            Returns the line settings.
+            ## Args:
+                None
+            ## Returns:
+                settings (gpio.LineSettings): The line settings.
+            """
+            return (gpio.LineSettings(
+                edge_detection=gpioEdge.BOTH,
+                bias=gpioBias.PULL_UP,
+                debounce_period=timedelta(milliseconds=10),
+            ),)
 
-    def return_identifier(self) -> Identifier:
-        """
-        ## Quick summary:
-        Returns the identifier.
-        ## Args:
-            None
-        ## Returns:
-            identifier (int): The identifier.
-        """
-        return self.identifier
+        def return_identifier(self) -> Identifier:
+            """
+            ## Quick summary:
+            Returns the identifier.
+            ## Args:
+                None
+            ## Returns:
+                identifier (int): The identifier.
+            """
+            return self.identifier
 
-    def return_pin(self) -> int:
-        """
-        ## Quick summary:
-        Returns the pin number.
-        ## Args:
-            None
-        ## Returns:
-            pin (int): The pin number.
-        """
-        return self.pin
+        def return_pin(self) -> tuple:
+            """
+            ## Quick summary:
+            Returns the pin number.
+            ## Args:
+                None
+            ## Returns:
+                pin (int): The pin number.
+            """
+            return (self.pin,)
+    class Encoder:
+        identifier = Identifier.Encoder
+        def __init__(
+            self,
+            pin_A: int,
+            pin_B: int,
+        ) -> None:
+            self.pin_A: int = pin_A
+            self.pin_B: int = pin_B
 
-
+        def return_settings(self) -> tuple:
+            return (gpio.LineSettings(
+                direction=gpioDirection.OUTPUT,
+                output_value=gpioValue.ACTIVE,
+            ), gpio.LineSettings(
+                direction=gpioDirection.OUTPUT,
+                output_value=gpioValue.ACTIVE,
+            ))
+        def return_pin(self) -> tuple:
+            return (self.pin_A, self.pin_B)
+        
+        def return_identifier(self) -> Identifier:
+            return self.identifier
+        
 
 # Tuple of GPIO elements
-GPIO_ELEMENTS: tuple = (LineSettings(2, Identifier.Button),
-                        LineSettings(3, Identifier.Button),
-                        LineSettings(4, Identifier.Button))
+GPIO_ELEMENTS: tuple = (
+    LineSettings.Button(2),
+    LineSettings.Encoder(3, 4),
+)
 # GPIO chip adress
 CHIP: str = "/dev/gpiochip4"
 # Number of inputs and outputs
@@ -124,6 +139,8 @@ def gpio_value_to_numeric(value: gpioValue) -> int:
             return 1
         case gpioValue.INACTIVE:
             return 0
+        case _:
+            raise Exception("Invalid value!")
 
 
 def gpio_process() -> None:
@@ -131,23 +148,37 @@ def gpio_process() -> None:
     GPIO process that watches GPIO lines and updates the multiprocessing array.
     """
     print("GPIO process started!")
+    prev_pin_A: gpioValue = gpioValue.ACTIVE
     with gpio.request_lines(
         CHIP,
         config={
-            settings.return_pin(): settings.return_settings()
+            pin: setting
             for settings in GPIO_ELEMENTS
+            for pin in settings.return_pin()
+            for setting in settings.return_settings()
         },
     ) as request:
         while True:
+            pass
             for index, elem in enumerate(GPIO_ELEMENTS):
                 match elem.return_identifier():
                     case Identifier.Button:
                         gpio_output_values[index] = gpio_value_to_numeric(
-                            request.get_value(elem.return_pin())
+                            request.get_value(elem.return_pin()[0])
                         )
                     case Identifier.Encoder:
+                        pin_A = request.get_value(elem.return_pin()[0])
+                        if pin_A != prev_pin_A and pin_A == gpioValue.ACTIVE:
+                            if request.get_value(elem.return_pin()[1]) == gpioValue.ACTIVE:
+                                gpio_output_values[index] -= 1
+                            else:
+                                gpio_output_values[index] += 1
+                        prev_pin_A = pin_A
+                    case Identifier.Sensor:
                         pass
-            sleep(0.05)
+                    case _:
+                        raise Exception("Invalid identifier!")
+            sleep(0.001)
 
 
 def openCV_process() -> None:
