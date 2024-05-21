@@ -33,21 +33,25 @@ class LineSettings:
     """
 
     class Button:
-        identifier = Identifier.Button
+        """
+        ## Quick summary:
+        A class that represents a button.
+        """
         def __init__(
             self,
             pin: int,
+
         ) -> None:
             """
             ## Quick summary:
-            Initializes a new instance of the LineSettings class.
+            Initializes a new instance of the Button class.
             ## Args:
             - pin (int): The pin number.
-            - identifier (Identifier): Identifier of a element connected to the pin.
             ## Returns:
                 None
             """
             self.pin: int = pin
+            self.identifier = Identifier.Button
 
         def return_settings(self) -> tuple:
             """
@@ -56,7 +60,7 @@ class LineSettings:
             ## Args:
                 None
             ## Returns:
-                settings (gpio.LineSettings): The line settings.
+                settings (tuple): The line settings.
             """
             return (gpio.LineSettings(
                 edge_detection=gpioEdge.BOTH,
@@ -71,7 +75,7 @@ class LineSettings:
             ## Args:
                 None
             ## Returns:
-                identifier (int): The identifier.
+                identifier (Identifier): The identifier.
             """
             return self.identifier
 
@@ -86,16 +90,37 @@ class LineSettings:
             """
             return (self.pin,)
     class Encoder:
-        identifier = Identifier.Encoder
+        """
+        ## Quick summary:
+        A class that represents an encoder.
+        """
         def __init__(
             self,
             pin_A: int,
             pin_B: int,
         ) -> None:
+            """
+            ## Quick summary:
+            Initializes a new instance of the Encoder class.
+            ## Args:
+            - pin_A (int): The pin number for the A line.
+            - pin_B (int): The pin number for the B line.
+            ## Returns:
+                None
+            """
             self.pin_A: int = pin_A
             self.pin_B: int = pin_B
+            self.identifier = Identifier.Encoder
 
         def return_settings(self) -> tuple:
+            """
+            ## Quick summary:
+            Returns the line settings.
+            ## Args:
+                None
+            ## Returns:
+                settings (tuple): The line settings.
+            """
             return (gpio.LineSettings(
                 direction=gpioDirection.OUTPUT,
                 output_value=gpioValue.ACTIVE,
@@ -104,9 +129,25 @@ class LineSettings:
                 output_value=gpioValue.ACTIVE,
             ))
         def return_pin(self) -> tuple:
+            """
+            ## Quick summary:
+            Returns the pin numbers.
+            ## Args:
+                None
+            ## Returns:
+                pin (tuple): The pin numbers.
+            """
             return (self.pin_A, self.pin_B)
         
         def return_identifier(self) -> Identifier:
+            """
+            ## Quick summary:
+            Returns the identifier.
+            ## Args:
+                None
+            ## Returns:
+                identifier (Identifier): The identifier.
+            """
             return self.identifier
         
 
