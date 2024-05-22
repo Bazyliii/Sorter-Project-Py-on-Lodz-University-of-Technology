@@ -111,6 +111,34 @@ class Encoder:
         return self.value.value
 
 
+class Sensor:
+    def __init__(self, pin: int, function=None) -> None:
+        self.pin: int = pin
+        self.identifier: Identifier = Identifier.Sensor
+        self.value: Synchronized = mpValue("i", 0)
+        self.function = function
+
+    def return_settings(self) -> tuple:
+        return (
+            gpio.LineSettings(
+                direction=gpioDirection.INPUT,
+                output_value=gpioValue.ACTIVE,
+            ),
+        )
+
+    def return_pin(self) -> tuple:
+        return (self.pin,)
+
+    def return_identifier(self) -> Identifier:
+        return self.identifier
+
+    def set_value(self, value: int) -> None:
+        self.value.value = value
+        if self.function is not None:
+            self.function(self.value.value)
+    def get_value(self) -> int:
+        return self.value.value
+    
 class Hardware_PWM:
     def __init__(self, channel: int, hz: int, duty_cycle: int) -> None:
         self.channel: int = channel
@@ -166,12 +194,13 @@ pwm_2: Hardware_PWM = Hardware_PWM(1, 100, 50)
 
 
 
-button_1: Button = Button(2, False, pwm_1.start)
-button_2: Button = Button(3, False, pwm_1.stop)
-encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
+# button_1: Button = Button(2, False, pwm_1.start)
+# button_2: Button = Button(3, False, pwm_1.stop)
+# encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
+sensor_1: Sensor = Sensor(2)
 
 # Dictionary of GPIO elements
-GPIO_ELEMENTS: dict = {Identifier.Button: {button_1, button_2}, Identifier.Encoder: {encoder_1}}
+GPIO_ELEMENTS: dict = {Identifier.Sensor: {sensor_1}}
 
 
 # GPIO chip adress
@@ -205,7 +234,10 @@ def gpio_process() -> None:
                 button.set_value(
                     gpio_value_to_numeric(request.get_value(button.return_pin()[0]))
                 )
-
+            for sensor in GPIO_ELEMENTS[Identifier.Sensor]:
+                sensor.set_value(
+                    gpio_value_to_numeric(request.get_value(sensor.return_pin()[0]))
+                )
             for encoder in GPIO_ELEMENTS[Identifier.Encoder]:
                 pin_A_state = request.get_value(encoder.return_pin()[0])
                 if (
@@ -233,7 +265,7 @@ def print_process() -> None:
     print("Print process started!")
     while True:
         print(
-            f"BUTTON_1: {button_1.get_value()} | " f"ENCODER_1: {encoder_1.get_value()} | " f"BUTTON_2: {button_2.get_value()}"
+            f"SENSOR_1: {sensor_1.get_value()} | "
         )
         sleep(0.5)
 
