@@ -25,12 +25,14 @@ class Button:
         self,
         pin: int,
         toggle: bool = False,
+        function=None,
     ) -> None:
         self.pin: int = pin
         self.identifier: Identifier = Identifier.Button
         self.value: Synchronized = mpValue("i", 1)
         self.toggle: bool = toggle
         self.last_state: int = 1
+        self.function = function
         
     def return_settings(self) -> tuple:
         return (
@@ -57,6 +59,10 @@ class Button:
                     self.value.value = 0
         else:
             self.value.value = value
+        if self.value.value == 0 and self.function is not None:
+            self.function()
+
+
 
     def get_value(self) -> Synchronized:
         return self.value.value
@@ -67,12 +73,16 @@ class Encoder:
         self,
         pin_A: int,
         pin_B: int,
+        multiplier: int = 1,
+        function=None,
     ) -> None:
         self.pin_A: int = pin_A
         self.pin_B: int = pin_B
         self.identifier = Identifier.Encoder
         self.value: Synchronized = mpValue("i", 0)
         self.prev_pin_A_state: gpioValue = gpioValue.ACTIVE
+        self.multiplier: int = multiplier
+        self.function = function
 
     def return_settings(self) -> tuple:
         return (
@@ -93,15 +103,72 @@ class Encoder:
         return self.identifier
 
     def change_value(self, value: int) -> None:
-        self.value.value += value
+        self.value.value += (value * self.multiplier)
+        if self.function is not None:
+            self.function(self.value.value)
 
     def get_value(self) -> int:
         return self.value.value
 
 
-button_1: Button = Button(2, True)
-button_2: Button = Button(17, False)
-encoder_1: Encoder = Encoder(3, 4)
+class Hardware_PWM:
+    def __init__(self, channel: int, hz: int, duty_cycle: int) -> None:
+        self.channel: int = channel
+        self.hz: int = hz
+        self.duty_cycle: int = duty_cycle
+        self.pwm: HardwarePWM = HardwarePWM(
+            pwm_channel=self.channel, hz=self.hz, chip=2
+        )
+        self.state: int = 0
+
+    def start(self) -> None:
+        if self.state == 0:
+            self.state = 1
+            self.pwm.start(self.duty_cycle)
+
+    def stop(self) -> None:
+        if self.state == 1:
+            self.state = 0
+            self.pwm.stop()
+
+    def change_duty_cycle(self, duty_cycle: int) -> None:
+        if self.state == 1 and duty_cycle>=0 and duty_cycle<=100:
+            self.duty_cycle = duty_cycle
+            self.pwm.change_duty_cycle(self.duty_cycle)
+
+    def change_frequency(self, hz: int) -> None:
+        if self.state == 1 and hz>0:
+            self.hz = hz
+            self.pwm.change_frequency(self.hz)
+
+class Software_PWM:
+    def __init__(self, pin: int, hz: int, duty_cycle: int) -> None:
+        self.pin: int = pin
+        self.hz: int = hz
+        self.duty_cycle: int = duty_cycle
+
+    def start(self) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def change_duty_cycle(self, duty_cycle: int) -> None:
+        pass
+
+    def change_frequency(self, hz: int) -> None:
+        pass
+
+
+
+pwm_1: Hardware_PWM = Hardware_PWM(0, 100, 50)
+pwm_2: Hardware_PWM = Hardware_PWM(1, 100, 50)
+
+
+
+button_1: Button = Button(2, False, pwm_1.start)
+button_2: Button = Button(3, False, pwm_1.stop)
+encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
 
 # Dictionary of GPIO elements
 GPIO_ELEMENTS: dict = {Identifier.Button: {button_1, button_2}, Identifier.Encoder: {encoder_1}}
@@ -162,50 +229,6 @@ def robot_control_process() -> None:
     print("Robot control process started!")
     pass
 
-
-class Hardware_PWM:
-    def __init__(self, channel: int, hz: int, duty_cycle: int) -> None:
-        self.channel: int = channel
-        self.hz: int = hz
-        self.duty_cycle: int = duty_cycle
-        self.pwm: HardwarePWM = HardwarePWM(
-            pwm_channel=self.channel, hz=self.hz, chip=2
-        )
-
-    def start(self) -> None:
-        self.pwm.start(self.duty_cycle)
-
-    def stop(self) -> None:
-        self.pwm.stop()
-
-    def change_duty_cycle(self, duty_cycle: int) -> None:
-        self.duty_cycle = duty_cycle
-        self.pwm.change_duty_cycle(self.duty_cycle)
-
-    def change_frequency(self, hz: int) -> None:
-        self.hz = hz
-        self.pwm.change_frequency(self.hz)
-
-
-class Software_PWM:
-    def __init__(self, pin: int, hz: int, duty_cycle: int) -> None:
-        self.pin: int = pin
-        self.hz: int = hz
-        self.duty_cycle: int = duty_cycle
-
-    def start(self) -> None:
-        pass
-
-    def stop(self) -> None:
-        pass
-
-    def change_duty_cycle(self, duty_cycle: int) -> None:
-        pass
-
-    def change_frequency(self, hz: int) -> None:
-        pass
-
-
 def print_process() -> None:
     print("Print process started!")
     while True:
@@ -216,9 +239,13 @@ def print_process() -> None:
 
 
 if __name__ == "__main__":
-    p1 = Process(target=gpio_process)
-    p2 = Process(target=print_process)
-    p1.start()
-    p2.start()
-    p1.join()
-    p2.join()
+    try:
+        p1 = Process(target=gpio_process)
+        p2 = Process(target=print_process)
+        p1.start()
+        p2.start()
+        p1.join()
+        p2.join()
+    finally:
+        pwm_1.stop()
+        pwm_2.stop()
