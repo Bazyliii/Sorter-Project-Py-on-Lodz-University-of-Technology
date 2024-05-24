@@ -64,7 +64,7 @@ class Button:
         if self.value.value == 0 and self.function is not None:
             self.function()
 
-    def get_value(self) -> Synchronized:
+    def get_value(self) -> int:
         return self.value.value
 
 
@@ -102,10 +102,9 @@ class Encoder:
     def return_identifier(self) -> Identifier:
         return self.identifier
 
-    def change_value(self, value: int) -> None:
-        if value != 0:
-            self.value.value += value * self.multiplier
-            if self.function is not None:
+    def set_value(self, value: int) -> None:
+            self.value.value = value * self.multiplier
+            if self.function is not None and self.value.value != 0:
                 self.function(self.value.value)
 
     def get_value(self) -> int:
@@ -122,8 +121,8 @@ class Sensor:
     def return_settings(self) -> tuple:
         return (
             gpio.LineSettings(
-                direction=gpioDirection.INPUT,
-                output_value=gpioValue.ACTIVE,
+                edge_detection=gpioEdge.BOTH,
+                bias=gpioBias.PULL_UP,
             ),
         )
 
@@ -147,16 +146,17 @@ class Hardware_PWM:
     def __init__(
         self,
         channel: int,
-        hz: int,
+        start_hz: int,
         duty_cycle: int,
         ramp: bool = False,
         max_hz: int = 0,
     ) -> None:
         self.channel: int = channel
-        self.hz: int = hz
+        self.start_hz: int = start_hz
+        self.internal_hz: int = start_hz
         self.duty_cycle: int = duty_cycle
         self.pwm: HardwarePWM = HardwarePWM(
-            pwm_channel=self.channel, hz=self.hz, chip=2
+            pwm_channel=self.channel, hz=self.start_hz, chip=2
         )
         self.state: int = 0
         self.ramp: bool = ramp
@@ -170,15 +170,18 @@ class Hardware_PWM:
                 Thread(target=self._ramp).start()
 
     def _ramp(self) -> None:
-        for i in linspace(10, self.max_hz, 100):
+        for i in linspace(self.start_hz, self.max_hz, 100, dtype=int):
             if self.state == 0:
                 break
-            self.change_frequency(i)
+            self.internal_hz = i
+            self.pwm.change_frequency(self.internal_hz)
             sleep(0.1)
 
     def stop(self) -> None:
         if self.state == 1:
             self.state = 0
+            self.change_frequency(self.start_hz)
+            self.internal_hz = self.start_hz
             self.pwm.stop()
 
     def change_duty_cycle(self, duty_cycle: int) -> None:
@@ -187,9 +190,12 @@ class Hardware_PWM:
             self.pwm.change_duty_cycle(self.duty_cycle)
 
     def change_frequency(self, hz: int) -> None:
-        if hz > 0 and self.hz != hz:
-            self.hz = hz
-            self.pwm.change_frequency(self.hz)
+            
+            self.internal_hz += hz
+            if self.internal_hz > 0:
+                self.pwm.change_frequency(self.internal_hz)
+            else:
+                self.pwm.change_frequency(1)
 
 
 class Software_PWM:
@@ -211,20 +217,21 @@ class Software_PWM:
         pass
 
 
-pwm_1: Hardware_PWM = Hardware_PWM(0, 10, 1, True, 2000)
-pwm_2: Hardware_PWM = Hardware_PWM(1, 100, 1)
+pwm_1: Hardware_PWM = Hardware_PWM(0, 100, 95, True, 1200)
+pwm_2: Hardware_PWM = Hardware_PWM(1, 500, 95)
 
 
 button_1: Button = Button(2, False, pwm_1.start)
 button_2: Button = Button(3, False, pwm_1.stop)
-encoder_1: Encoder = Encoder(17, 27, 20, pwm_1.change_frequency)
-# sensor_1: Sensor = Sensor(2)
+encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
+sensor_1: Sensor = Sensor(21)
+sensor_2: Sensor = Sensor(20)
 
 # Dictionary of GPIO elements
 GPIO_ELEMENTS: dict = {
     Identifier.Button: {button_1, button_2},
     Identifier.Encoder: {encoder_1},
-    Identifier.Sensor: {},
+    Identifier.Sensor: {sensor_1, sensor_2},
 }
 
 
@@ -270,9 +277,11 @@ def gpio_process() -> None:
                     and pin_A_state == gpioValue.ACTIVE
                 ):
                     if request.get_value(encoder.return_pin()[1]) == gpioValue.ACTIVE:
-                        encoder.change_value(-1)
+                        encoder.set_value(-1)
                     else:
-                        encoder.change_value(1)
+                        encoder.set_value(1)
+                else:
+                    encoder.set_value(0)
                 encoder.prev_pin_A_state = pin_A_state
             sleep(0.001)
 
@@ -290,7 +299,7 @@ def robot_control_process() -> None:
 def print_process() -> None:
     print("Print process started!")
     while True:
-        print(f"ENCODER_1: {encoder_1.get_value()} | ")
+        print(f"ENCODER_1: {encoder_1.get_value()} | BUTTON_1: {button_1.get_value()}" f" | BUTTON_2: {button_2.get_value()} | SENSOR_1: {sensor_1.get_value()}" f" | SENSOR_2: {sensor_2.get_value()}")
         sleep(0.5)
 
 
