@@ -8,7 +8,7 @@ import numpy as np
 #     pass
 
 def main():
-    capture = cv2.VideoCapture(r"C:/Users/jaros/Downloads/Prezentacja1.mp4")
+    capture = cv2.VideoCapture(0)
     fps = capture.get(cv2.CAP_PROP_FPS)
     delay = int(1000 / fps)
     # delay = 1
@@ -22,7 +22,7 @@ def main():
     while True:
         _, frame = capture.read()
         # frame = cv2.imread(r"C:/Users/jaros/Downloads/dataset/obraz (18).png")
-        frame = frame[300:590, 200:600]
+        frame = frame[200:490, 200:300]
         blur = cv2.GaussianBlur(frame, (5, 5), 0)
         # gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         hsv = cv2.cvtColor(blur, cv2.COLOR_BGR2HSV)
@@ -38,7 +38,7 @@ def main():
         # mask = cv2.inRange(hsv, lower_orange, upper_orange)
         
         lower_orange = np.array([0, 38, 123])
-        upper_orange = np.array([28, 255, 255])
+        upper_orange = np.array([58, 255, 255])
         mask = cv2.inRange(hsv, lower_orange, upper_orange)
         kernel = np.ones((3, 3), np.uint8)
         mask = cv2.erode(mask, kernel)
@@ -85,7 +85,7 @@ def main():
         # cv2.drawContours(frame, contours, -1, (0, 255, 0), 6)    
 
         # print("Number of Contours found = " + str(len(contours)))
-        # cv2.imshow("mask", mask)
+        cv2.imshow("mask", mask)
         ####### ORANGE DETECTION ######## 
         cv2.imshow("frame", frame)
         if cv2.waitKey(delay) & 0xFF == ord("q"):

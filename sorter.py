@@ -27,14 +27,15 @@ class Button:
         self,
         pin: int,
         toggle: bool = False,
-        function=None,
+        function = None,
     ) -> None:
         self.pin: int = pin
         self.identifier: Identifier = Identifier.Button
         self.value: Synchronized = mpValue("i", 1)
         self.toggle: bool = toggle
         self.last_state: int = 1
-        self.function = function
+        self.function  = function
+        print(type(function))
 
     def return_settings(self) -> tuple:
         return (
@@ -190,7 +191,6 @@ class Hardware_PWM:
             self.pwm.change_duty_cycle(self.duty_cycle)
 
     def change_frequency(self, hz: int) -> None:
-            
             self.internal_hz += hz
             if self.internal_hz > 0:
                 self.pwm.change_frequency(self.internal_hz)
@@ -217,15 +217,28 @@ class Software_PWM:
         pass
 
 
-pwm_1: Hardware_PWM = Hardware_PWM(0, 100, 95, True, 1200)
+class Pulse:
+    def __init__(self, num_of_pulses: int, frequency: int) -> None:
+        
+        pass
+    def start(self) -> None:
+        pass    
+    
+
+pwm_1: Hardware_PWM = Hardware_PWM(0, 100, 95, True, 1300)
 pwm_2: Hardware_PWM = Hardware_PWM(1, 500, 95)
 
 
 button_1: Button = Button(2, False, pwm_1.start)
 button_2: Button = Button(3, False, pwm_1.stop)
 encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
+encoder_2: Encoder = Encoder(5, 18)
+encoder_3: Encoder = Encoder(6, 27)
 sensor_1: Sensor = Sensor(21)
 sensor_2: Sensor = Sensor(20)
+sensor_3: Sensor = Sensor(16)
+sensor_4: Sensor = Sensor(19)
+
 
 # Dictionary of GPIO elements
 GPIO_ELEMENTS: dict = {
@@ -237,6 +250,15 @@ GPIO_ELEMENTS: dict = {
 
 # GPIO chip adress
 CHIP: str = "/dev/gpiochip4"
+
+
+def sorter_process() -> None:
+    print("Sorter process started!")
+    krancowka_1 = sensor_3.get_value()
+    krancowka_2 = sensor_4.get_value()
+    while not krancowka_1:
+        
+        pass
 
 
 def gpio_value_to_numeric(value: gpioValue) -> int:
