@@ -21,7 +21,7 @@ class Identifier(Enum):
     Encoder = 1
     Sensor = 2
     Pulse = 3
-    ContinousSignal = 4
+    ContinuousSignal = 4
 
 
 CHIP: str = "/dev/gpiochip4"
@@ -243,12 +243,12 @@ class Pulse:
             return False
 
 
-class ContinousSignal:
+class ContinuousSignal:
     def __init__(self, pin: int) -> None:
         self._pin: int = pin
-        self._identifier: Identifier = Identifier.ContinousSignal
+        self._identifier: Identifier = Identifier.ContinuousSignal
         self._value: Synchronized[bool] = mpValue("i", False)
-        GPIO_ELEMENTS[Identifier.ContinousSignal].append(self)
+        GPIO_ELEMENTS[Identifier.ContinuousSignal].append(self)
 
     def return_settings(self) -> tuple:
         return (
@@ -277,8 +277,8 @@ class ContinousSignal:
 pwm_1: HardwarePWM = HardwarePWM(0, 100, 95, True, 1300)
 pwm_2: HardwarePWM = HardwarePWM(1, 500, 95)
 pulse_1: Pulse = Pulse(14)
-continous_signal_1: ContinousSignal = ContinousSignal(20)
-button_1: Button = Button(2, False, pwm_1.start)
+continous_signal_1: ContinuousSignal = ContinuousSignal(20)
+button_1: Button = Button(2, False, lambda: pulse_1.set_counter(1000))
 button_2: Button = Button(3, False, pwm_1.stop)
 button_3: Button = Button(15, False, lambda: continous_signal_1.set_value(True))
 button_4: Button = Button(16, False, lambda: continous_signal_1.set_value(False))
@@ -344,7 +344,7 @@ def gpio_process() -> None:
                 else:
                     request.set_value(pulse.return_pin()[0], gpioValue.ACTIVE)
             ##################################################################################
-            for continous_signal in GPIO_ELEMENTS[Identifier.ContinousSignal]:
+            for continous_signal in GPIO_ELEMENTS[Identifier.ContinuousSignal]:
                 if continous_signal.get_value():
                     request.set_value(
                         continous_signal.return_pin()[0], gpioValue.ACTIVE
