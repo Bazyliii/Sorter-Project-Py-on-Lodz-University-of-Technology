@@ -274,14 +274,14 @@ class ContinuousSignal:
         return self._value.value
 
 
-pwm_1: HardwarePWM = HardwarePWM(0, 100, 95, True, 1300)
+pwm_1: HardwarePWM = HardwarePWM(0, 100, 95, True, 1400)
 pwm_2: HardwarePWM = HardwarePWM(1, 500, 95)
-pulse_1: Pulse = Pulse(14)
+pulse_1: Pulse = Pulse(21)
 continous_signal_1: ContinuousSignal = ContinuousSignal(20)
-button_1: Button = Button(2, False, lambda: pulse_1.set_counter(1000))
+button_1: Button = Button(2, False, pwm_1.start)
 button_2: Button = Button(3, False, pwm_1.stop)
-button_3: Button = Button(15, False, lambda: continous_signal_1.set_value(True))
-button_4: Button = Button(16, False, lambda: continous_signal_1.set_value(False))
+button_3: Button = Button(26, False, pulse_1.stop)
+button_4: Button = Button(19, False, lambda: pulse_1.set_counter(400))
 encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
 
 
