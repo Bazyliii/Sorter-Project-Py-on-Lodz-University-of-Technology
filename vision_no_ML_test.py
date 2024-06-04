@@ -3,19 +3,19 @@ import numpy as np
 
 
 def main():
-    capture = cv2.VideoCapture(r"C:\\Users\\jaros\\Downloads\\recordd.avi")
+    capture = cv2.VideoCapture(0)
     capture.set(cv2.CAP_PROP_FPS, 30)
     fps = capture.get(cv2.CAP_PROP_FPS)
-    # delay = int(1000 / fps)
-    delay = 1
+    delay = int(1000 / fps)
+    # delay = 1
     lower_green = np.array([35, 50, 50])
     upper_green = np.array([80, 255, 255])
     lower_orange = np.array([15, 50, 50])
     upper_orange = np.array([25, 255, 255])
     lower_red = np.array([0, 50, 50])
     upper_red = np.array([10, 255, 255])
-    lower_white = np.array([0, 0, 230])
-    upper_white = np.array([255, 15, 255])
+    lower_white = np.array([0, 0, 100])
+    upper_white = np.array([70, 40, 255])
 
     reds = 0
     oranges = 0
