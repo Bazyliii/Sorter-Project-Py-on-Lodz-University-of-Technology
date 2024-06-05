@@ -276,13 +276,28 @@ class ContinuousSignal:
 
 pwm_1: HardwarePWM = HardwarePWM(0, 100, 95, True, 1400)
 pwm_2: HardwarePWM = HardwarePWM(1, 500, 95)
-pulse_1: Pulse = Pulse(21)
-continous_signal_1: ContinuousSignal = ContinuousSignal(20)
-button_1: Button = Button(2, False, pwm_1.start)
-button_2: Button = Button(3, False, pwm_1.stop)
-button_3: Button = Button(26, False, pulse_1.stop)
-button_4: Button = Button(19, False, lambda: pulse_1.set_counter(400))
-encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
+# pulse_1: Pulse = Pulse(21)
+# continous_signal_1: ContinuousSignal = ContinuousSignal(20)
+# button_1: Button = Button(2, False, pwm_1.start)
+# button_2: Button = Button(3, False, pwm_1.stop)
+# button_3: Button = Button(26, False, pulse_1.stop)
+# button_4: Button = Button(19, False, lambda: pulse_1.set_counter(400))
+# encoder_1: Encoder = Encoder(4, 17, 20, pwm_1.change_frequency)
+
+encoder_1: Encoder = Encoder(2,3)       # 2-3
+encoder_2: Encoder = Encoder(4, 17)     # 4-5
+encoder_3: Encoder = Encoder(27, 22)    # 6-7
+encoder_4: Encoder = Encoder(10, 9)     # 8-9
+encoder_5: Encoder = Encoder(11, 5)     # 10-11
+button_1: Button = Button(6)            # 12
+button_2: Button = Button(19)           # 13
+button_3: Button = Button(26)           # 14
+# blue 15
+# red 16
+# yellow 17
+
+
+
 
 
 def gpio_value_to_numeric(value: gpioValue) -> int:
@@ -378,7 +393,7 @@ def print_process() -> None:
         for index, sensor in enumerate(GPIO_ELEMENTS[Identifier.Sensor]):
             temp_str += f"Sensor {index}: {sensor.get_value()} | "
         print(temp_str)
-        sleep(0.5)
+        sleep(0.01)
 
 
 if __name__ == "__main__":
