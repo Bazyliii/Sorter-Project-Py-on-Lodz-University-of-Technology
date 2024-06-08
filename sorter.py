@@ -1,6 +1,7 @@
 # Imports
 import cv2
 import numpy
+from typing import Any, Sequence, Generator
 from enum import Enum
 from flask import Flask, Response, render_template
 from multiprocessing import Process, Value as mpValue, Queue as mpQueue
@@ -26,7 +27,7 @@ class Color(Enum):
     ORANGE = 2
     WHITE = 3
 
-    def get_rgb(self):
+    def get_rgb(self) -> tuple[int, int, int]:
         match self:
             case Color.RED:
                 return (0, 0, 255)
@@ -39,11 +40,11 @@ class Color(Enum):
 
 
 class HSVColorMask:
-    def __init__(self, lower: tuple[int, int, int], upper: tuple[int, int, int]):
+    def __init__(self, lower: tuple[int, int, int], upper: tuple[int, int, int]) -> None:
         self.lower: numpy.ndarray = numpy.array(lower)
         self.upper: numpy.ndarray = numpy.array(upper)
 
-    def get_contours(self, frame: numpy.ndarray):
+    def get_contours(self, frame: numpy.ndarray) -> Sequence[cv2.Mat | numpy.ndarray[Any, numpy.dtype[numpy.integer[Any] | numpy.floating[Any]]]]:
         color_mask: numpy.ndarray = cv2.inRange(frame, self.lower, self.upper)
         return cv2.findContours(color_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
 
@@ -63,7 +64,7 @@ class Button:
         self._value: Synchronized[int] = mpValue("i", 1)
         self._toggle: bool = toggle
         self._last_state: int = 1
-        self._function = function
+        self._function: Any | None = function
         GPIO_ELEMENTS[Identifier.Button].append(self)
 
     def return_settings(self) -> tuple:
@@ -112,7 +113,7 @@ class Encoder:
         self._value: Synchronized[int] = mpValue("i", 0)
         self._prev_pin_A_state: gpioValue = gpioValue.ACTIVE
         self._multiplier: int = multiplier
-        self._function = function
+        self._function: Any | None = function
         GPIO_ELEMENTS[Identifier.Encoder].append(self)
 
     def return_settings(self) -> tuple:
@@ -153,7 +154,7 @@ class Sensor:
         self._pin: int = pin
         self._identifier: Identifier = Identifier.Sensor
         self._value: Synchronized[int] = mpValue("i", 0)
-        self._function = function
+        self._function: Any | None = function
         GPIO_ELEMENTS[Identifier.Sensor].append(self)
 
     def return_settings(self) -> tuple:
@@ -322,6 +323,11 @@ POINT_RADIUS: int = 11
 FLASK_SERVER: Flask = Flask(__name__)
 FLASK_IP_PORT: tuple[str, int] = ("0.0.0.0", 5500)
 
+capture: cv2.VideoCapture = cv2.VideoCapture(CAPTURE)
+capture.set(cv2.CAP_PROP_FPS, 30)
+capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
+capture.set(cv2.CAP_PROP_EXPOSURE, 80)
+
 element_queue: ElementQueue = ElementQueue()
 pwm_1: HardwarePWM = HardwarePWM(0, 100, 95, True, 1400)
 pwm_2: HardwarePWM = HardwarePWM(1, 500, 95)
@@ -372,7 +378,7 @@ def gpio_process() -> None:
                 sensor.set_value(gpio_value_to_numeric(request.get_value(sensor.return_pin()[0])))
             ##################################################################################
             for encoder in GPIO_ELEMENTS[Identifier.Encoder]:
-                pin_A_state = request.get_value(encoder.return_pin()[0])
+                pin_A_state: gpioValue = request.get_value(encoder.return_pin()[0])
                 if pin_A_state != encoder.get_prev_pin_A_state() and pin_A_state == gpioValue.ACTIVE:
                     if request.get_value(encoder.return_pin()[1]) == gpioValue.ACTIVE:
                         encoder.set_value(-1)
@@ -409,20 +415,16 @@ def camera_process() -> None:
     orange_mask: HSVColorMask = HSVColorMask((10, 50, 50), (45, 255, 255))
     white_mask: HSVColorMask = HSVColorMask((0, 0, 34), (180, 48, 255))
 
-    capture: cv2.VideoCapture = cv2.VideoCapture(CAPTURE)
-    capture.set(cv2.CAP_PROP_FPS, 30)
-    capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
-    capture.set(cv2.CAP_PROP_EXPOSURE, 80)
     frame_delay: int = int(1000 / capture.get(cv2.CAP_PROP_FPS))
 
     output_frame: numpy.ndarray = numpy.array(None)
     thread_lock: Lock = Lock()
     tracker_types: dict[Color, list] = {color: [] for color in Color}
 
-    def openCV_thread():
+    def openCV_thread() -> None:
         nonlocal thread_lock, output_frame
 
-        def detector(contours, color: Color):
+        def detector(contours, color: Color) -> None:
             current_contours: list = []
             for contour in contours:
                 if cv2.contourArea(contour) > 500:
@@ -458,7 +460,7 @@ def camera_process() -> None:
 
             sleep(frame_delay / 1000)
 
-    def generate_frame():
+    def generate_frame() -> Generator[bytes]:
         nonlocal thread_lock, output_frame
         while True:
             with thread_lock:
@@ -470,11 +472,11 @@ def camera_process() -> None:
             yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + bytearray(encodedImage) + b"\r\n")
 
     @FLASK_SERVER.route("/")
-    def index():
+    def index() -> str:
         return render_template("index.html")
 
     @FLASK_SERVER.route("/video_feed")
-    def video_feed():
+    def video_feed() -> Response:
         return Response(generate_frame(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
     t1: Thread = Thread(target=openCV_thread)
@@ -516,3 +518,4 @@ if __name__ == "__main__":
     finally:
         pwm_1.stop()
         pwm_2.stop()
+        capture.release()
