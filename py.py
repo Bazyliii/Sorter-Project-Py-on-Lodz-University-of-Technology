@@ -5,7 +5,7 @@ from flask import Response
 from flask import Flask
 from flask import render_template
 from threading import Thread, Lock
-
+from waitress import serve
 
 app = Flask(__name__)
 
@@ -94,6 +94,7 @@ def cv():
             if is_new:
                 queue_of_elements.append(color)
         tracker_types[color] = current_contours
+        
 
     while True:
         frame: numpy.ndarray = capture.read()[1]
@@ -102,10 +103,12 @@ def cv():
         detector(red_mask.get_contours(hsv_frame), Colors.RED)
         detector(green_mask.get_contours(hsv_frame), Colors.GREEN)
         detector(orange_mask.get_contours(hsv_frame), Colors.ORANGE)
-        detector(white_mask.get_contours(hsv_frame), Colors.WHITE)
+        # detector(white_mask.get_contours(hsv_frame), Colors.WHITE)
+
 
         cv2.rectangle(frame, (area[0], area[2]), (area[1], area[3]), (0, 0, 0), 3)
-        # cv2.imshow("Frame", frame)
+        cv2.imshow("Frame", frame)
+
         with lock:
             outputFrame = frame.copy()
         print(queue_of_elements)
@@ -142,4 +145,4 @@ if __name__ == "__main__":
     t1 = Thread(target=cv)
     t1.daemon = True
     t1.start()
-    app.run(host="0.0.0.0", threaded=True, port=5500)
+    serve(app, host="0.0.0.0", port=5500)
