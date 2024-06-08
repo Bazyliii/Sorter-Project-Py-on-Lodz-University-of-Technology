@@ -46,7 +46,7 @@ green_mask: HSVColorMask = HSVColorMask((45, 85, 53), (84, 255, 255))  # Git
 orange_mask: HSVColorMask = HSVColorMask((10, 50, 50), (45, 255, 255))  # Git
 white_mask: HSVColorMask = HSVColorMask((0, 0, 34), (180, 48, 255))  # Git
 
-capture: cv2.VideoCapture = cv2.VideoCapture(r"C:\Users\jaros\Downloads\recordd.avi")
+capture: cv2.VideoCapture = cv2.VideoCapture(r"/home/bazili/Desktop/Projekt_Wizja/record.avi")
 capture.set(cv2.CAP_PROP_FPS, 30)
 capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
 capture.set(cv2.CAP_PROP_EXPOSURE, 80)
@@ -107,7 +107,7 @@ def cv():
 
 
         cv2.rectangle(frame, (area[0], area[2]), (area[1], area[3]), (0, 0, 0), 3)
-        cv2.imshow("Frame", frame)
+        # cv2.imshow("Frame", frame)
 
         with lock:
             outputFrame = frame.copy()
