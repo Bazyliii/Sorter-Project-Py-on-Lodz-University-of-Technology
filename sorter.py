@@ -5,8 +5,8 @@ from telnetlib import DO, ECHO, IAC, SB, TTYPE, WILL, Telnet
 from typing import Any, Sequence, Generator, NoReturn
 from enum import Enum
 from flask import Flask, Response, render_template
-from multiprocessing import Process, Value as mpValue, Queue as mpQueue
-from multiprocessing.sharedctypes import Synchronized
+from multiprocessing import Process, Value as mpValue, Queue as mpQueue, Array as mpArray
+from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from threading import Thread, Lock
 from waitress import serve
 from rpi_hardware_pwm import HardwarePWM as HwPWM
@@ -61,7 +61,6 @@ class Identifier(Enum):
 class Button:
     def __init__(self, pin: int, toggle: bool = False, function: Any | None = None) -> None:
         self.__pin: int = pin
-        self.__identifier: Identifier = Identifier.Button
         self.__value: Synchronized[int] = mpValue("i", 1)
         self.__toggle: bool = toggle
         self.__last_state: int = 1
@@ -76,9 +75,6 @@ class Button:
                 debounce_period=timedelta(milliseconds=10),
             ),
         )
-
-    def return__identifier(self) -> Identifier:
-        return self.__identifier
 
     def return__pin(self) -> tuple:
         return (self.__pin,)
@@ -110,7 +106,6 @@ class Encoder:
     ) -> None:
         self.__pin_A: int = pin_A
         self.__pin_B: int = pin_B
-        self.__identifier = Identifier.Encoder
         self.__value: Synchronized[int] = mpValue("i", 0)
         self.__prev__pin_A_state: gpioValue = gpioValue.ACTIVE
         self.__multiplier: int = multiplier
@@ -132,9 +127,6 @@ class Encoder:
     def return__pin(self) -> tuple:
         return (self.__pin_A, self.__pin_B)
 
-    def return__identifier(self) -> Identifier:
-        return self.__identifier
-
     def set_value(self, value: int) -> None:
         self.__value.value = value * self.__multiplier
         if self.__function is not None and self.__value.value != 0:
@@ -153,7 +145,6 @@ class Encoder:
 class Sensor:
     def __init__(self, pin: int, function: Any | None = None) -> None:
         self.__pin: int = pin
-        self.__identifier: Identifier = Identifier.Sensor
         self.__value: Synchronized[int] = mpValue("i", 0)
         self.__function: Any | None = function
         GPIO_ELEMENTS[Identifier.Sensor].append(self)
@@ -168,9 +159,6 @@ class Sensor:
 
     def return__pin(self) -> tuple:
         return (self.__pin,)
-
-    def return__identifier(self) -> Identifier:
-        return self.__identifier
 
     def set_value(self, value: int) -> None:
         if self.__value.value != value:
@@ -238,10 +226,9 @@ class HardwarePWM:
 class Pulse:
     def __init__(self, pin: int) -> None:
         self.__pin: int = pin
-        self.__identifier: Identifier = Identifier.Pulse
+        self.__state: Synchronized[bool] = mpValue("b", False)
         self.__counter: Synchronized[int] = mpValue("i", 0)
         GPIO_ELEMENTS[Identifier.Pulse].append(self)
-        pass
 
     def return_settings(self) -> tuple:
         return (
@@ -254,10 +241,8 @@ class Pulse:
     def return__pin(self) -> tuple:
         return (self.__pin,)
 
-    def return__identifier(self) -> Identifier:
-        return self.__identifier
-
     def stop(self) -> None:
+        self.__state.value = False
         self.__counter.value = 0
 
     def get_counter(self) -> int:
@@ -265,18 +250,22 @@ class Pulse:
 
     def set_counter(self, value: int) -> None:
         self.__counter.value = value
+        if self.__counter.value <= 0:
+            self.__state.value = False
 
-    def start(self) -> bool:
+    def start(self) -> None:
         if self.__counter.value > 0:
-            return True
+            self.__state.value = True
         else:
-            return False
+            self.__state.value = False
+
+    def get_pulse_state(self) -> bool:
+        return self.__state.value
 
 
 class ContinuousSignal:
     def __init__(self, pin: int) -> None:
         self.__pin: int = pin
-        self.__identifier: Identifier = Identifier.ContinuousSignal
         self.__value: Synchronized[bool] = mpValue("i", False)
         GPIO_ELEMENTS[Identifier.ContinuousSignal].append(self)
 
@@ -290,9 +279,6 @@ class ContinuousSignal:
 
     def return__pin(self) -> tuple:
         return (self.__pin,)
-
-    def return__identifier(self) -> Identifier:
-        return self.__identifier
 
     def switch_value(self) -> None:
         self.__value.value = not self.__value.value
@@ -312,9 +298,10 @@ class Sorter:
         self.__direction: ContinuousSignal = direction
         self.__zero_sensor: Sensor = zero_sensor
         self.__max_sensor: Sensor = max_sensor
-        self.__current_position: int = 0
-        self.__max_pos: int = 0
-        self.__containters_positions: list[int] = [0] * num_of_containters
+        self.__current_position: Synchronized[int] = mpValue("i", 0)
+        self.__max_pos: Synchronized[int] = mpValue("i", 0)
+        self.__positioned: Synchronized[bool] = mpValue("b", False)
+        self.__containters_positions: SynchronizedArray = mpArray("i", self.__num_of_containters)
 
     def add_element(self, value: Color) -> None:
         self.__queue.put(value)
@@ -322,31 +309,38 @@ class Sorter:
     def get_element(self) -> Color:
         return self.__queue.get()
 
-    def get_zero_position(self) -> None:
+    def position(self, steps: int) -> None:
         self.__direction.set_value(False)
-        self.__motor.set_counter(2)
-        while self.__zero_sensor.get_value():
-            self.__motor.set_counter(1)
-            sleep(0.01)
-        else:
-            self.__motor.stop()
-            self._current_position = 0
+        self.__motor.set_counter(steps)
+        self.__motor.start()
 
-    def get_max_position(self) -> None:
-        self.__direction.set_value(True)
-        self.__motor.set_counter(2)
-        while self.__max_sensor.get_value():
-            self.__motor.set_counter(1)
-            self.__max_pos += 1
+        while self.__zero_sensor.get_value():
             sleep(0.01)
         else:
             self.__motor.stop()
-            self.__current_position = self.__max_pos
-            self._calculate_containters_position()
-    def _calculate_containters_position(self) -> None:
-        self.__containters_position = numpy.linspace(0, self.__max_pos, self.__num_of_containters, dtype=int)
-        print(self.__containters_position)
-        pass
+            self.__current_position.value = 0
+        self.__direction.set_value(True)
+        self.__motor.set_counter(steps)
+        self.__motor.start()
+        while self.__max_sensor.get_value():
+            sleep(0.01)
+        else:
+            self.__current_position.value = self.__max_pos.value = steps - self.__motor.get_counter()
+            self.__motor.stop()
+            for index, i in enumerate(numpy.linspace(0, self.__max_pos.value, self.__num_of_containters + 2, dtype=int)[1:5]):
+                self.__containters_positions[index] = i
+                print(i)
+            self.__positioned.value = True    
+    def go_to_position(self, position: int) -> None:
+        print(self.__current_position.value, self.__containters_positions[position], position)
+        if self.__positioned.value:
+            if self.__current_position.value > self.__containters_positions[position]:
+                self.__direction.set_value(False)
+            else:
+                self.__direction.set_value(True)
+            self.__motor.set_counter(abs(self.__current_position.value - self.__containters_positions[position])*2)
+            self.__motor.start()
+            self.__current_position.value = self.__containters_positions[position]
 
 
 # Constants
@@ -370,10 +364,6 @@ capture.set(cv2.CAP_PROP_EXPOSURE, 80)
 
 pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=100, duty_cycle=95, ramp=True, max_hz=1400)  # PWM silnika taśmy GPIO 12
 
-button_1: Button = Button(pin=2, toggle=False)  # Start
-button_2: Button = Button(pin=3, toggle=False)  # Stop
-button_3: Button = Button(pin=4, toggle=False)  # Reset
-
 sensor_1: Sensor = Sensor(pin=22)  # Czujnik optyczny sortownika
 sensor_2: Sensor = Sensor(pin=10)  # Krańcówka sortownika
 sensor_3: Sensor = Sensor(pin=9)  # Krańcówka sortownika
@@ -391,7 +381,12 @@ encoder_3: Encoder = Encoder(pin_A=26, pin_B=16)  # Enkoder #3
 encoder_4: Encoder = Encoder(pin_A=24, pin_B=20)  # Enkoder #4
 encoder_5: Encoder = Encoder(pin_A=25, pin_B=21)  # Enkoder #5
 
+button_1: Button = Button(pin=2, toggle=False, function=lambda: sorter.go_to_position(1))  # Start
+button_2: Button = Button(pin=3, toggle=False, function=lambda: sorter.go_to_position(2))  # Stop
+button_3: Button = Button(pin=4, toggle=False, function=lambda: sorter.go_to_position(0))  # Reset
+
 sorter: Sorter = Sorter(motor=pulse_1, direction=continous_signal_1, zero_sensor=sensor_2, max_sensor=sensor_3, num_of_containters=4)
+
 
 
 def gpio_value_to_numeric(value: gpioValue) -> int:
@@ -431,7 +426,7 @@ def gpio_process() -> NoReturn:
                 encoder.set_prev__pin_A_state(pin_A_state)
             ##################################################################################
             for pulse in GPIO_ELEMENTS[Identifier.Pulse]:
-                if pulse.start():
+                if pulse.get_pulse_state():
                     if pulse.get_counter() % 2 == 0:
                         request.set_value(pulse.return__pin()[0], gpioValue.ACTIVE)
                     else:
@@ -446,7 +441,7 @@ def gpio_process() -> NoReturn:
                 else:
                     request.set_value(continous_signal.return__pin()[0], gpioValue.INACTIVE)
             ##################################################################################
-            sleep(0.001)
+            sleep(0.25)
 
 
 def camera_process() -> None:
@@ -484,7 +479,8 @@ def camera_process() -> None:
                         is_new: bool = False
                         break
                     if is_new:
-                        sorter.add_element(color)
+                        # sorter.add_element(color)
+                        pass
                 tracker_types[color] = current_contours
 
         while True:
@@ -548,12 +544,12 @@ def print_process() -> None:
 
 def sorter_process() -> None:
     print("Sorter process started!")
-    sorter.get_zero_position()
-    sleep(0.1)
-    sorter.get_max_position()
+    sorter.position(20)
 
 
 PROCESS_LIST: tuple[Process, ...] = (Process(target=gpio_process), Process(target=robot_control_process), Process(target=camera_process), Process(target=print_process), Process(target=sorter_process))
+
+# PROCESS_LIST: tuple[Process, ...] = (Process(target=gpio_process), Process(target=robot_control_process), Process(target=print_process), Process(target=sorter_process))
 
 
 if __name__ == "__main__":
