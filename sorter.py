@@ -56,6 +56,7 @@ class Identifier(Enum):
     Sensor = 2
     Pulse = 3
     ContinuousSignal = 4
+    EmergencyButton = 5
 
 
 class Button:
@@ -76,7 +77,7 @@ class Button:
             ),
         )
 
-    def return__pin(self) -> tuple:
+    def return_pin(self) -> tuple:
         return (self.__pin,)
 
     def set_value(self, value: int) -> None:
@@ -107,7 +108,7 @@ class Encoder:
         self.__pin_A: int = pin_A
         self.__pin_B: int = pin_B
         self.__value: Synchronized[int] = mpValue("i", 0)
-        self.__prev__pin_A_state: gpioValue = gpioValue.ACTIVE
+        self.__prev_pin_A_state: gpioValue = gpioValue.ACTIVE
         self.__multiplier: int = multiplier
         self.__function: Any | None = function
         GPIO_ELEMENTS[Identifier.Encoder].append(self)
@@ -124,7 +125,7 @@ class Encoder:
             ),
         )
 
-    def return__pin(self) -> tuple:
+    def return_pin(self) -> tuple:
         return (self.__pin_A, self.__pin_B)
 
     def set_value(self, value: int) -> None:
@@ -135,11 +136,11 @@ class Encoder:
     def get_value(self) -> int:
         return self.__value.value
 
-    def get_prev__pin_A_state(self) -> gpioValue:
-        return self.__prev__pin_A_state
+    def get_prev_pin_A_state(self) -> gpioValue:
+        return self.__prev_pin_A_state
 
-    def set_prev__pin_A_state(self, value: gpioValue) -> None:
-        self.__prev__pin_A_state: gpioValue = value
+    def set_prev_pin_A_state(self, value: gpioValue) -> None:
+        self.__prev_pin_A_state: gpioValue = value
 
 
 class Sensor:
@@ -157,7 +158,7 @@ class Sensor:
             ),
         )
 
-    def return__pin(self) -> tuple:
+    def return_pin(self) -> tuple:
         return (self.__pin,)
 
     def set_value(self, value: int) -> None:
@@ -177,7 +178,7 @@ class HardwarePWM:
         start_hz: int,
         duty_cycle: int,
         ramp: bool = False,
-        max_hz: int = 0,
+        max_hz: int = 1,
     ) -> None:
         self.__channel: int = channel
         self.__start_hz: int = start_hz
@@ -238,7 +239,7 @@ class Pulse:
             ),
         )
 
-    def return__pin(self) -> tuple:
+    def return_pin(self) -> tuple:
         return (self.__pin,)
 
     def stop(self) -> None:
@@ -277,7 +278,7 @@ class ContinuousSignal:
             ),
         )
 
-    def return__pin(self) -> tuple:
+    def return_pin(self) -> tuple:
         return (self.__pin,)
 
     def switch_value(self) -> None:
@@ -310,12 +311,19 @@ class Sorter:
         return self.__queue.get()
 
     def position(self, steps: int) -> None:
+        Thread(target=self.__position_thread, args=(steps,)).start()
+
+    def __position_thread(self, steps: int) -> None:
+        if process_state.get_state() == State.Stop:
+            return
         self.__direction.set_value(False)
         self.__motor.set_counter(steps)
         self.__motor.start()
 
         while self.__zero_sensor.get_value():
             sleep(0.01)
+            if process_state.get_state() == State.Stop:
+                return
         else:
             self.__motor.stop()
             self.__current_position.value = 0
@@ -324,13 +332,16 @@ class Sorter:
         self.__motor.start()
         while self.__max_sensor.get_value():
             sleep(0.01)
+            if process_state.get_state() == State.Stop:
+                return
         else:
             self.__current_position.value = self.__max_pos.value = steps - self.__motor.get_counter()
             self.__motor.stop()
             for index, i in enumerate(numpy.linspace(0, self.__max_pos.value, self.__num_of_containters + 2, dtype=int)[1:5]):
                 self.__containters_positions[index] = i
                 print(i)
-            self.__positioned.value = True    
+            self.__positioned.value = True
+
     def go_to_position(self, position: int) -> None:
         print(self.__current_position.value, self.__containters_positions[position], position)
         if self.__positioned.value:
@@ -338,9 +349,51 @@ class Sorter:
                 self.__direction.set_value(False)
             else:
                 self.__direction.set_value(True)
-            self.__motor.set_counter(abs(self.__current_position.value - self.__containters_positions[position])*2)
+            self.__motor.set_counter(abs(self.__current_position.value - self.__containters_positions[position]) * 2)
             self.__motor.start()
             self.__current_position.value = self.__containters_positions[position]
+
+
+class EmergencyButton:
+    def __init__(self, pin: int) -> None:
+        self.__pin: int = pin
+        self.__value: Synchronized[int] = mpValue("i", 0)
+        GPIO_ELEMENTS[Identifier.EmergencyButton].append(self)
+
+    def return_pin(self) -> tuple:
+        return (self.__pin,)
+
+    def return_settings(self) -> tuple:
+        return (
+            gpio.LineSettings(
+                edge_detection=gpioEdge.BOTH,
+                bias=gpioBias.PULL_UP,
+            ),
+        )
+
+    def get_value(self) -> int:
+        return self.__value.value
+
+    def set_value(self, value: int) -> None:
+        self.__value.value = value
+
+
+class State(Enum):
+    Stop = 0
+    Start = 1
+    Reset = 2
+    Error = 3
+
+
+class ProcessState:
+    def __init__(self) -> None:
+        self.__state: Synchronized[int] = mpValue("i", State.Stop.value)
+
+    def set_state(self, state: State) -> None:
+        self.__state.value = state.value
+
+    def get_state(self) -> State:
+        return State(self.__state.value)
 
 
 # Constants
@@ -356,6 +409,7 @@ ROBOT_PORT: int = 23
 ROBOT_USER: str = "as"
 ROBOT_CONNECTION = Telnet()
 
+process_state: ProcessState = ProcessState()
 
 capture: cv2.VideoCapture = cv2.VideoCapture(CAPTURE)
 capture.set(cv2.CAP_PROP_FPS, 30)
@@ -375,18 +429,33 @@ continous_signal_2: ContinuousSignal = ContinuousSignal(pin=14)  # Dioda niebies
 continous_signal_3: ContinuousSignal = ContinuousSignal(pin=15)  # Dioda czerwonego przycisku
 continous_signal_4: ContinuousSignal = ContinuousSignal(pin=18)  # Dioda żółtego przycisku
 
-encoder_1: Encoder = Encoder(pin_A=6, pin_B=7)  # Enkoder #1
+encoder_1: Encoder = Encoder(pin_A=6, pin_B=7, multiplier=20, function=pwm_1.change_frequency)  # Enkoder #1
 encoder_2: Encoder = Encoder(pin_A=19, pin_B=8)  # Enkoder #2
 encoder_3: Encoder = Encoder(pin_A=26, pin_B=16)  # Enkoder #3
 encoder_4: Encoder = Encoder(pin_A=24, pin_B=20)  # Enkoder #4
 encoder_5: Encoder = Encoder(pin_A=25, pin_B=21)  # Enkoder #5
 
-button_1: Button = Button(pin=2, toggle=False, function=lambda: sorter.go_to_position(1))  # Start
-button_2: Button = Button(pin=3, toggle=False, function=lambda: sorter.go_to_position(2))  # Stop
-button_3: Button = Button(pin=4, toggle=False, function=lambda: sorter.go_to_position(0))  # Reset
+emergency_button_1: EmergencyButton = EmergencyButton(pin=17)  # Grzyb bezpieczeństwa
 
 sorter: Sorter = Sorter(motor=pulse_1, direction=continous_signal_1, zero_sensor=sensor_2, max_sensor=sensor_3, num_of_containters=4)
 
+
+def start_process() -> None:
+    if process_state.get_state() == State.Stop:
+        process_state.set_state(State.Start)
+        sorter.position(steps=200)
+        pwm_1.start()
+
+
+def stop_process() -> None:
+    process_state.set_state(State.Stop)
+    pwm_1.stop()
+    pulse_1.stop()
+
+
+button_1: Button = Button(pin=2, toggle=False, function=start_process)  # Start
+button_2: Button = Button(pin=3, toggle=False, function=stop_process)  # Stop
+button_3: Button = Button(pin=4, toggle=False)  # Reset
 
 
 def gpio_value_to_numeric(value: gpioValue) -> int:
@@ -399,47 +468,49 @@ def gpio_value_to_numeric(value: gpioValue) -> int:
             raise Exception("Invalid value!")
 
 
-def gpio_process() -> NoReturn:
+def gpio_process() -> None:
     print("GPIO process started!")
 
     with gpio.request_lines(
         CHIP,
-        config={pin: setting for settings_list in GPIO_ELEMENTS.values() for settings in settings_list for pin in settings.return__pin() for setting in settings.return_settings()},
+        config={pin: setting for settings_list in GPIO_ELEMENTS.values() for settings in settings_list for pin in settings.return_pin() for setting in settings.return_settings()},
     ) as request:
         while True:
+            for emergency_button in GPIO_ELEMENTS[Identifier.EmergencyButton]:
+                emergency_button.set_value(gpio_value_to_numeric(request.get_value(emergency_button.return_pin()[0])))
             ##################################################################################
             for button in GPIO_ELEMENTS[Identifier.Button]:
-                button.set_value(gpio_value_to_numeric(request.get_value(button.return__pin()[0])))
+                button.set_value(gpio_value_to_numeric(request.get_value(button.return_pin()[0])))
             ##################################################################################
             for sensor in GPIO_ELEMENTS[Identifier.Sensor]:
-                sensor.set_value(gpio_value_to_numeric(request.get_value(sensor.return__pin()[0])))
+                sensor.set_value(gpio_value_to_numeric(request.get_value(sensor.return_pin()[0])))
             ##################################################################################
             for encoder in GPIO_ELEMENTS[Identifier.Encoder]:
-                pin_A_state: gpioValue = request.get_value(encoder.return__pin()[0])
-                if pin_A_state != encoder.get_prev__pin_A_state() and pin_A_state == gpioValue.ACTIVE:
-                    if request.get_value(encoder.return__pin()[1]) == gpioValue.ACTIVE:
+                pin_A_state: gpioValue = request.get_value(encoder.return_pin()[0])
+                if pin_A_state != encoder.get_prev_pin_A_state() and pin_A_state == gpioValue.ACTIVE:
+                    if request.get_value(encoder.return_pin()[1]) == gpioValue.ACTIVE:
                         encoder.set_value(-1)
                     else:
                         encoder.set_value(1)
                 else:
                     encoder.set_value(0)
-                encoder.set_prev__pin_A_state(pin_A_state)
+                encoder.set_prev_pin_A_state(pin_A_state)
             ##################################################################################
             for pulse in GPIO_ELEMENTS[Identifier.Pulse]:
                 if pulse.get_pulse_state():
                     if pulse.get_counter() % 2 == 0:
-                        request.set_value(pulse.return__pin()[0], gpioValue.ACTIVE)
+                        request.set_value(pulse.return_pin()[0], gpioValue.ACTIVE)
                     else:
-                        request.set_value(pulse.return__pin()[0], gpioValue.INACTIVE)
+                        request.set_value(pulse.return_pin()[0], gpioValue.INACTIVE)
                     pulse.set_counter(pulse.get_counter() - 1)
                 else:
-                    request.set_value(pulse.return__pin()[0], gpioValue.ACTIVE)
+                    request.set_value(pulse.return_pin()[0], gpioValue.ACTIVE)
             ##################################################################################
             for continous_signal in GPIO_ELEMENTS[Identifier.ContinuousSignal]:
                 if continous_signal.get_value():
-                    request.set_value(continous_signal.return__pin()[0], gpioValue.ACTIVE)
+                    request.set_value(continous_signal.return_pin()[0], gpioValue.ACTIVE)
                 else:
-                    request.set_value(continous_signal.return__pin()[0], gpioValue.INACTIVE)
+                    request.set_value(continous_signal.return_pin()[0], gpioValue.INACTIVE)
             ##################################################################################
             sleep(0.25)
 
@@ -479,24 +550,27 @@ def camera_process() -> None:
                         is_new: bool = False
                         break
                     if is_new:
-                        # sorter.add_element(color)
+                        # sorter.go_to_position(color.value)
                         pass
                 tracker_types[color] = current_contours
 
         while True:
-            frame: numpy.ndarray = capture.read()[1]
-            hvs_frame: numpy.ndarray = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+            if process_state.get_state() == State.Start:
+                frame: numpy.ndarray = capture.read()[1]
+                hvs_frame: numpy.ndarray = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-            detector(red_mask.get_contours(hvs_frame), Color.RED)
-            detector(green_mask.get_contours(hvs_frame), Color.GREEN)
-            detector(orange_mask.get_contours(hvs_frame), Color.ORANGE)
-            detector(white_mask.get_contours(hvs_frame), Color.WHITE)
+                detector(red_mask.get_contours(hvs_frame), Color.RED)
+                detector(green_mask.get_contours(hvs_frame), Color.GREEN)
+                detector(orange_mask.get_contours(hvs_frame), Color.ORANGE)
+                detector(white_mask.get_contours(hvs_frame), Color.WHITE)
 
-            cv2.rectangle(frame, (DETECTION_AREA[0], DETECTION_AREA[2]), (DETECTION_AREA[1], DETECTION_AREA[3]), (0, 0, 0), 3)
-            with thread_lock:
-                output_frame = frame.copy()
+                cv2.rectangle(frame, (DETECTION_AREA[0], DETECTION_AREA[2]), (DETECTION_AREA[1], DETECTION_AREA[3]), (0, 0, 0), 3)
+                with thread_lock:
+                    output_frame = frame.copy()
 
-            sleep(frame_delay / 1000)
+                sleep(frame_delay / 1000)
+            else:
+                sleep(0.1)
 
     def generate_frame() -> Generator[bytes, Any, NoReturn]:
         nonlocal thread_lock, output_frame
@@ -531,33 +605,41 @@ def print_process() -> None:
     print("Print process started!")
     return
     while True:
-        temp_str: str = ""
-        for index, button in enumerate(GPIO_ELEMENTS[Identifier.Button]):
-            temp_str += f"Button {index + 1}: {button.get_value()} | "
-        for index, encoder in enumerate(GPIO_ELEMENTS[Identifier.Encoder]):
-            temp_str += f"Encoder {index + 1}: {encoder.get_value()} | "
-        for index, sensor in enumerate(GPIO_ELEMENTS[Identifier.Sensor]):
-            temp_str += f"Sensor {index + 1}: {sensor.get_value()} | "
-        print(temp_str)
-        sleep(0.01)
+        if process_state.get_state() == State.Start:
+            temp_str: str = ""
+            for index, button in enumerate(GPIO_ELEMENTS[Identifier.Button]):
+                temp_str += f"Button {index + 1}: {button.get_value()} | "
+            for index, encoder in enumerate(GPIO_ELEMENTS[Identifier.Encoder]):
+                temp_str += f"Encoder {index + 1}: {encoder.get_value()} | "
+            for index, sensor in enumerate(GPIO_ELEMENTS[Identifier.Sensor]):
+                temp_str += f"Sensor {index + 1}: {sensor.get_value()} | "
+            print(temp_str)
+            sleep(0.1)
+        else:
+            sleep(0.1)
 
 
 def sorter_process() -> None:
     print("Sorter process started!")
-    sorter.position(20)
-
-
-PROCESS_LIST: tuple[Process, ...] = (Process(target=gpio_process), Process(target=robot_control_process), Process(target=camera_process), Process(target=print_process), Process(target=sorter_process))
-
-# PROCESS_LIST: tuple[Process, ...] = (Process(target=gpio_process), Process(target=robot_control_process), Process(target=print_process), Process(target=sorter_process))
 
 
 if __name__ == "__main__":
-    try:
-        for process in PROCESS_LIST:
-            process.start()
-        for process in PROCESS_LIST:
-            process.join()
-    finally:
-        pwm_1.stop()
-        capture.release()
+    gpio_proc = Process(target=gpio_process)
+    robot_proc = Process(target=robot_control_process)
+    camera_proc = Process(target=camera_process)
+    sorter_proc = Process(target=sorter_process)
+    print_proc = Process(target=print_process)
+
+    gpio_proc.start()
+    robot_proc.start()
+    camera_proc.start()
+    sorter_proc.start()
+    print_proc.start()
+
+    gpio_proc.join()
+    robot_proc.join()
+    camera_proc.join()
+    sorter_proc.join()
+    print_proc.join()
+    capture.release()
+    pwm_1.stop()
