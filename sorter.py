@@ -180,46 +180,46 @@ class HardwarePWM:
         ramp: bool = False,
         max_hz: int = 1,
     ) -> None:
-        self.__channel: int = channel
-        self.__start_hz: int = start_hz
-        self.__internal_hz: int = start_hz
-        self.__duty_cycle: int = duty_cycle
-        self.__pwm: HwPWM = HwPWM(pwm_channel=self.__channel, hz=self.__start_hz, chip=2)
-        self.__state: int = 0
-        self.__ramp: bool = ramp
-        self.__max_hz: int = max_hz
+        self.__channel: Synchronized[int] = mpValue("i", channel)
+        self.__start_hz: Synchronized[int] = mpValue("i", start_hz)
+        self.__internal_hz: Synchronized[int] = mpValue("i", start_hz)
+        self.__duty_cycle: Synchronized[int] = mpValue("i", duty_cycle)
+        self.__pwm: HwPWM = HwPWM(pwm_channel=self.__channel.value, hz=self.__start_hz.value, chip=2)
+        self.__state: Synchronized[int] = mpValue("b", False)
+        self.__ramp: Synchronized[bool] = mpValue("b", ramp)
+        self.__max_hz: Synchronized[int] = mpValue("i", max_hz)
 
     def start(self) -> None:
-        if self.__state == 0:
-            self.__state: int = 1
-            self.__pwm.start(self.__duty_cycle)
-            if self.__ramp:
+        if not self.__state.value:
+            self.__state.value = True
+            self.__pwm.start(self.__duty_cycle.value)
+            if self.__ramp.value:
                 Thread(target=self.__ramp_thread).start()
 
     def __ramp_thread(self) -> None:
-        for i in numpy.linspace(self.__start_hz, self.__max_hz, 100, dtype=int):
-            if self.__state == 0:
+        for i in numpy.linspace(self.__start_hz.value, self.__max_hz.value, 100, dtype=int):
+            if not self.__state.value:
                 break
-            self.__internal_hz: int = i
-            self.__pwm.change_frequency(self.__internal_hz)
+            self.__internal_hz.value = i
+            self.__pwm.change_frequency(self.__internal_hz.value)
             sleep(0.1)
 
     def stop(self) -> None:
-        if self.__state == 1:
-            self.__state: int = 0
-            self.change_frequency(self.__start_hz)
-            self.__internal_hz = self.__start_hz
+        if self.__state.value:
+            self.__state.value = False
+            self.change_frequency(self.__start_hz.value)
+            self.__internal_hz.value = self.__start_hz.value
             self.__pwm.stop()
 
     def change_duty_cycle(self, duty_cycle: int) -> None:
         if duty_cycle >= 0 and duty_cycle <= 100:
-            self.__duty_cycle: int = duty_cycle
-            self.__pwm.change_duty_cycle(self.__duty_cycle)
+            self.__duty_cycle.value = duty_cycle
+            self.__pwm.change_duty_cycle(self.__duty_cycle.value)
 
     def change_frequency(self, hz: int) -> None:
-        self.__internal_hz += hz
-        if self.__internal_hz > 0:
-            self.__pwm.change_frequency(self.__internal_hz)
+        self.__internal_hz.value += hz
+        if self.__internal_hz.value > 0:
+            self.__pwm.change_frequency(self.__internal_hz.value)
         else:
             self.__pwm.change_frequency(1)
 
@@ -304,6 +304,7 @@ class Sorter:
         self.__positioned: Synchronized[bool] = mpValue("b", False)
         self.__containters_positions: SynchronizedArray = mpArray("i", self.__num_of_containters)
         self.__working: Synchronized[bool] = mpValue("b", False)
+
     def add_element(self, value: Color) -> None:
         self.__queue.put(value)
 
@@ -361,6 +362,7 @@ class Sorter:
             self.__current_position.value = self.__containters_positions[position]
             self.__working.value = False
             print(self.__current_position.value)
+
     def go_to_position(self, position: int) -> None:
         Thread(target=self.__go_to_position_thread, args=(position,)).start()
 
@@ -430,7 +432,7 @@ capture.set(cv2.CAP_PROP_FPS, 30)
 capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
 capture.set(cv2.CAP_PROP_EXPOSURE, 80)
 
-pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=1300, duty_cycle=55, ramp=False, max_hz=1300)  # PWM silnika taśmy GPIO 12
+pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=100, duty_cycle=55, ramp=True, max_hz=1300)  # PWM silnika taśmy GPIO 12
 
 sensor_1: Sensor = Sensor(pin=22)  # Czujnik optyczny sortownika
 sensor_2: Sensor = Sensor(pin=10)  # Krańcówka sortownika
@@ -469,7 +471,8 @@ def stop_process() -> None:
 
 
 def reset_process() -> None:
-    process_state.set_state(State.Stop)
+    if process_state.get_state() == State.Reset:
+        process_state.set_state(State.Stop)
 
 
 button_1: Button = Button(pin=2, toggle=False, function=start_process)  # Start
@@ -550,6 +553,7 @@ def camera_process() -> None:
 
     def openCV_thread() -> NoReturn:
         nonlocal thread_lock, output_frame
+
         def detector(contours, color: Color) -> None:
             current_contours: list = []
             for contour in contours:
@@ -621,23 +625,23 @@ def robot_control_process() -> None:
 
 def print_process() -> None:
     print("Print process started!")
-    # return
     while True:
         if process_state.get_state() == State.Start:
             temp_str: str = ""
-            # for index, button in enumerate(GPIO_ELEMENTS[Identifier.Button]):
-            #     temp_str += f"Button {index + 1}: {button.get_value()} | "
-            # for index, encoder in enumerate(GPIO_ELEMENTS[Identifier.Encoder]):
-            #     temp_str += f"Encoder {index + 1}: {encoder.get_value()} | "
+            for index, button in enumerate(GPIO_ELEMENTS[Identifier.Button]):
+                temp_str += f"Button {index + 1}: {button.get_value()} | "
+            for index, encoder in enumerate(GPIO_ELEMENTS[Identifier.Encoder]):
+                temp_str += f"Encoder {index + 1}: {encoder.get_value()} | "
             for index, sensor in enumerate(GPIO_ELEMENTS[Identifier.Sensor]):
                 temp_str += f"Sensor {index + 1}: {sensor.get_value()} | "
             print(temp_str)
-            sleep(0.001)
+            sleep(0.1)
         else:
             sleep(0.1)
 
 
 def sorter_process() -> None:
+    print("Sorter process started!")
     while True:
         if process_state.get_state() == State.Start:
             if not sorter.get_working():
@@ -646,10 +650,12 @@ def sorter_process() -> None:
                 sleep(0.001)
             else:
                 sleep(0.75)
-    print("Sorter process started!")
 
-def panel_lights_process() -> None:
+
+def panel_process() -> None:
     while True:
+        if not emergency_button_1.get_value():
+            stop_process()
         if process_state.get_state() == State.Reset:
             continous_signal_2.set_value(True)
             continous_signal_4.set_value(False)
@@ -666,29 +672,23 @@ def panel_lights_process() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        gpio_proc = Process(target=gpio_process)
-        robot_proc = Process(target=robot_control_process)
-        camera_proc = Process(target=camera_process)
-        sorter_proc = Process(target=sorter_process)
-        print_proc = Process(target=print_process)
-        panel_proc = Process(target=panel_lights_process)
-        gpio_proc.start()
-        robot_proc.start()
-        camera_proc.start()
-        sorter_proc.start()
-        print_proc.start()
-        panel_proc.start()
+    gpio_proc = Process(target=gpio_process)
+    robot_proc = Process(target=robot_control_process)
+    camera_proc = Process(target=camera_process)
+    sorter_proc = Process(target=sorter_process)
+    print_proc = Process(target=print_process)
+    panel_proc = Process(target=panel_process)
 
-        gpio_proc.join()
-        robot_proc.join()
-        camera_proc.join()
-        sorter_proc.join()
-        print_proc.join()
-        panel_proc.join()
-        capture.release()
-        pwm_1.stop()
-    except KeyboardInterrupt:
-        stop_process()
-    finally:
-        stop_process()
+    gpio_proc.start()
+    robot_proc.start()
+    camera_proc.start()
+    sorter_proc.start()
+    print_proc.start()
+    panel_proc.start()
+
+    gpio_proc.join()
+    robot_proc.join()
+    camera_proc.join()
+    sorter_proc.join()
+    print_proc.join()
+    panel_proc.join()
