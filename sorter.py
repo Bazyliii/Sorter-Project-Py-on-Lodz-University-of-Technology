@@ -303,7 +303,7 @@ class Sorter:
         self.__max_pos: Synchronized[int] = mpValue("i", 0)
         self.__positioned: Synchronized[bool] = mpValue("b", False)
         self.__containters_positions: SynchronizedArray = mpArray("i", self.__num_of_containters)
-
+        self.__working: Synchronized[bool] = mpValue("b", False)
     def add_element(self, value: Color) -> None:
         self.__queue.put(value)
 
@@ -318,10 +318,11 @@ class Sorter:
             return
         self.__direction.set_value(False)
         self.__motor.set_counter(steps)
+        sleep(0.1)
         self.__motor.start()
 
         while self.__zero_sensor.get_value():
-            sleep(0.01)
+            sleep(0.001)
             if process_state.get_state() == State.Stop:
                 return
         else:
@@ -329,9 +330,10 @@ class Sorter:
             self.__current_position.value = 0
         self.__direction.set_value(True)
         self.__motor.set_counter(steps)
+        sleep(0.1)
         self.__motor.start()
         while self.__max_sensor.get_value():
-            sleep(0.01)
+            sleep(0.001)
             if process_state.get_state() == State.Stop:
                 return
         else:
@@ -339,19 +341,31 @@ class Sorter:
             self.__motor.stop()
             for index, i in enumerate(numpy.linspace(0, self.__max_pos.value, self.__num_of_containters + 2, dtype=int)[1:5]):
                 self.__containters_positions[index] = i
-                print(i)
             self.__positioned.value = True
+        print(self.__containters_positions[:], self.__current_position.value, self.__positioned.value)
 
-    def go_to_position(self, position: int) -> None:
-        print(self.__current_position.value, self.__containters_positions[position], position)
+    def __go_to_position_thread(self, position: int) -> None:
         if self.__positioned.value:
+            self.__working.value = True
             if self.__current_position.value > self.__containters_positions[position]:
                 self.__direction.set_value(False)
             else:
                 self.__direction.set_value(True)
-            self.__motor.set_counter(abs(self.__current_position.value - self.__containters_positions[position]) * 2)
+            self.__motor.set_counter(abs(self.__current_position.value - self.__containters_positions[position]))
+            sleep(0.1)
             self.__motor.start()
+            while self.__motor.get_pulse_state():
+                sleep(0.001)
+                if process_state.get_state() == State.Stop:
+                    return
             self.__current_position.value = self.__containters_positions[position]
+            self.__working.value = False
+            print(self.__current_position.value)
+    def go_to_position(self, position: int) -> None:
+        Thread(target=self.__go_to_position_thread, args=(position,)).start()
+
+    def get_working(self) -> bool:
+        return self.__working.value
 
 
 class EmergencyButton:
@@ -387,7 +401,7 @@ class State(Enum):
 
 class ProcessState:
     def __init__(self) -> None:
-        self.__state: Synchronized[int] = mpValue("i", State.Stop.value)
+        self.__state: Synchronized[int] = mpValue("i", State.Reset.value)
 
     def set_state(self, state: State) -> None:
         self.__state.value = state.value
@@ -398,7 +412,7 @@ class ProcessState:
 
 # Constants
 CHIP: str = "/dev/gpiochip4"
-CAPTURE: str = r"/home/bazili/Desktop/Projekt_Wizja/record.avi"
+CAPTURE = 0
 GPIO_ELEMENTS: dict[Identifier, list] = {identifier: [] for identifier in Identifier}
 DETECTION_AREA: tuple[int, int, int, int] = (300, 500, 100, 340)
 POINT_RADIUS: int = 11
@@ -416,7 +430,7 @@ capture.set(cv2.CAP_PROP_FPS, 30)
 capture.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)
 capture.set(cv2.CAP_PROP_EXPOSURE, 80)
 
-pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=100, duty_cycle=95, ramp=True, max_hz=1400)  # PWM silnika taśmy GPIO 12
+pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=1300, duty_cycle=55, ramp=False, max_hz=1300)  # PWM silnika taśmy GPIO 12
 
 sensor_1: Sensor = Sensor(pin=22)  # Czujnik optyczny sortownika
 sensor_2: Sensor = Sensor(pin=10)  # Krańcówka sortownika
@@ -429,6 +443,7 @@ continous_signal_2: ContinuousSignal = ContinuousSignal(pin=14)  # Dioda niebies
 continous_signal_3: ContinuousSignal = ContinuousSignal(pin=15)  # Dioda czerwonego przycisku
 continous_signal_4: ContinuousSignal = ContinuousSignal(pin=18)  # Dioda żółtego przycisku
 
+
 encoder_1: Encoder = Encoder(pin_A=6, pin_B=7, multiplier=20, function=pwm_1.change_frequency)  # Enkoder #1
 encoder_2: Encoder = Encoder(pin_A=19, pin_B=8)  # Enkoder #2
 encoder_3: Encoder = Encoder(pin_A=26, pin_B=16)  # Enkoder #3
@@ -437,25 +452,29 @@ encoder_5: Encoder = Encoder(pin_A=25, pin_B=21)  # Enkoder #5
 
 emergency_button_1: EmergencyButton = EmergencyButton(pin=17)  # Grzyb bezpieczeństwa
 
-sorter: Sorter = Sorter(motor=pulse_1, direction=continous_signal_1, zero_sensor=sensor_2, max_sensor=sensor_3, num_of_containters=4)
+sorter: Sorter = Sorter(motor=pulse_1, direction=continous_signal_1, zero_sensor=sensor_3, max_sensor=sensor_2, num_of_containters=4)
 
 
 def start_process() -> None:
     if process_state.get_state() == State.Stop:
         process_state.set_state(State.Start)
-        sorter.position(steps=200)
+        sorter.position(steps=800)
         pwm_1.start()
 
 
 def stop_process() -> None:
-    process_state.set_state(State.Stop)
+    process_state.set_state(State.Reset)
     pwm_1.stop()
     pulse_1.stop()
 
 
+def reset_process() -> None:
+    process_state.set_state(State.Stop)
+
+
 button_1: Button = Button(pin=2, toggle=False, function=start_process)  # Start
 button_2: Button = Button(pin=3, toggle=False, function=stop_process)  # Stop
-button_3: Button = Button(pin=4, toggle=False)  # Reset
+button_3: Button = Button(pin=4, toggle=False, function=reset_process)  # Reset
 
 
 def gpio_value_to_numeric(value: gpioValue) -> int:
@@ -512,7 +531,7 @@ def gpio_process() -> None:
                 else:
                     request.set_value(continous_signal.return_pin()[0], gpioValue.INACTIVE)
             ##################################################################################
-            sleep(0.25)
+            sleep(0.0015)
 
 
 def camera_process() -> None:
@@ -531,7 +550,6 @@ def camera_process() -> None:
 
     def openCV_thread() -> NoReturn:
         nonlocal thread_lock, output_frame
-
         def detector(contours, color: Color) -> None:
             current_contours: list = []
             for contour in contours:
@@ -549,10 +567,10 @@ def camera_process() -> None:
                     if numpy.linalg.norm(numpy.array([center_x, center_y]) - numpy.array([tracker_x, tracker_y])) < 25:
                         is_new: bool = False
                         break
-                    if is_new:
-                        # sorter.go_to_position(color.value)
-                        pass
-                tracker_types[color] = current_contours
+                if is_new:
+                    sorter.add_element(color)
+
+            tracker_types[color] = current_contours
 
         while True:
             if process_state.get_state() == State.Start:
@@ -603,43 +621,74 @@ def robot_control_process() -> None:
 
 def print_process() -> None:
     print("Print process started!")
-    return
+    # return
     while True:
         if process_state.get_state() == State.Start:
             temp_str: str = ""
-            for index, button in enumerate(GPIO_ELEMENTS[Identifier.Button]):
-                temp_str += f"Button {index + 1}: {button.get_value()} | "
-            for index, encoder in enumerate(GPIO_ELEMENTS[Identifier.Encoder]):
-                temp_str += f"Encoder {index + 1}: {encoder.get_value()} | "
+            # for index, button in enumerate(GPIO_ELEMENTS[Identifier.Button]):
+            #     temp_str += f"Button {index + 1}: {button.get_value()} | "
+            # for index, encoder in enumerate(GPIO_ELEMENTS[Identifier.Encoder]):
+            #     temp_str += f"Encoder {index + 1}: {encoder.get_value()} | "
             for index, sensor in enumerate(GPIO_ELEMENTS[Identifier.Sensor]):
                 temp_str += f"Sensor {index + 1}: {sensor.get_value()} | "
             print(temp_str)
-            sleep(0.1)
+            sleep(0.001)
         else:
             sleep(0.1)
 
 
 def sorter_process() -> None:
+    while True:
+        if process_state.get_state() == State.Start:
+            if not sorter.get_working():
+                sorter.go_to_position(sorter.get_element().value)
+            while sensor_1.get_value():
+                sleep(0.001)
+            else:
+                sleep(0.75)
     print("Sorter process started!")
+
+def panel_lights_process() -> None:
+    while True:
+        if process_state.get_state() == State.Reset:
+            continous_signal_2.set_value(True)
+            continous_signal_4.set_value(False)
+            continous_signal_3.set_value(False)
+        if process_state.get_state() == State.Start:
+            continous_signal_3.set_value(True)
+            continous_signal_2.set_value(False)
+            continous_signal_4.set_value(False)
+        if process_state.get_state() == State.Stop:
+            continous_signal_4.set_value(True)
+            continous_signal_3.set_value(False)
+            continous_signal_2.set_value(False)
+        sleep(0.1)
 
 
 if __name__ == "__main__":
-    gpio_proc = Process(target=gpio_process)
-    robot_proc = Process(target=robot_control_process)
-    camera_proc = Process(target=camera_process)
-    sorter_proc = Process(target=sorter_process)
-    print_proc = Process(target=print_process)
+    try:
+        gpio_proc = Process(target=gpio_process)
+        robot_proc = Process(target=robot_control_process)
+        camera_proc = Process(target=camera_process)
+        sorter_proc = Process(target=sorter_process)
+        print_proc = Process(target=print_process)
+        panel_proc = Process(target=panel_lights_process)
+        gpio_proc.start()
+        robot_proc.start()
+        camera_proc.start()
+        sorter_proc.start()
+        print_proc.start()
+        panel_proc.start()
 
-    gpio_proc.start()
-    robot_proc.start()
-    camera_proc.start()
-    sorter_proc.start()
-    print_proc.start()
-
-    gpio_proc.join()
-    robot_proc.join()
-    camera_proc.join()
-    sorter_proc.join()
-    print_proc.join()
-    capture.release()
-    pwm_1.stop()
+        gpio_proc.join()
+        robot_proc.join()
+        camera_proc.join()
+        sorter_proc.join()
+        print_proc.join()
+        panel_proc.join()
+        capture.release()
+        pwm_1.stop()
+    except KeyboardInterrupt:
+        stop_process()
+    finally:
+        stop_process()
