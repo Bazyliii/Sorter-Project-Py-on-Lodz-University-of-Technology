@@ -1,24 +1,36 @@
 # Imports
-import cv2
-import numpy
-from telnetlib import DO, ECHO, IAC, SB, TTYPE, WILL, Telnet
-from typing import Any, Sequence, Generator, NoReturn
-from enum import Enum
-from flask import Flask, Response, render_template
-from multiprocessing import Process, Value as mpValue, Queue as mpQueue, Array as mpArray
-from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
-from threading import Thread, Lock
-from waitress import serve
-from rpi_hardware_pwm import HardwarePWM as HwPWM
-from time import sleep
+from __future__ import annotations
+
 from datetime import timedelta
+from enum import Enum
+from multiprocessing import Array as mpArray
+from multiprocessing import Process
+from multiprocessing import Queue as mpQueue
+from multiprocessing import Value as mpValue
+from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
+from telnetlib import Telnet
+from threading import Lock, Thread
+from time import sleep
+from typing import Any, Callable, Generator, Literal, NoReturn, Sequence
+
+import cv2
 import gpiod as gpio
+import numpy
+from flask import Flask, Response, render_template
+from gpiod.line import (
+    Bias as gpioBias,
+)
 from gpiod.line import (
     Direction as gpioDirection,
-    Value as gpioValue,
-    Bias as gpioBias,
+)
+from gpiod.line import (
     Edge as gpioEdge,
 )
+from gpiod.line import (
+    Value as gpioValue,
+)
+from rpi_hardware_pwm import HardwarePWM as HwPWM
+from waitress import serve
 
 
 # Classes
@@ -29,6 +41,7 @@ class Color(Enum):
     WHITE = 3
 
     def get_rgb(self) -> tuple[int, int, int]:
+        """Get RGB value for color."""
         match self:
             case Color.RED:
                 return (0, 0, 255)
@@ -42,10 +55,12 @@ class Color(Enum):
 
 class HSVColorMask:
     def __init__(self, lower: tuple[int, int, int], upper: tuple[int, int, int]) -> None:
+        """Initialize HSV color masking."""
         self.__lower: numpy.ndarray = numpy.array(lower)
         self.__upper: numpy.ndarray = numpy.array(upper)
 
     def get_contours(self, frame: numpy.ndarray) -> Sequence[cv2.Mat | numpy.ndarray[Any, numpy.dtype[numpy.integer[Any] | numpy.floating[Any]]]]:
+        """Get contours for HSV color masking."""
         color_mask: numpy.ndarray = cv2.inRange(frame, self.__lower, self.__upper)
         return cv2.findContours(color_mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)[0]
 
@@ -60,7 +75,7 @@ class Identifier(Enum):
 
 
 class Button:
-    def __init__(self, pin: int, toggle: bool = False, function: Any | None = None) -> None:
+    def __init__(self, pin: int, toggle: bool = False, function: Callable | None = None) -> None:
         self.__pin: int = pin
         self.__value: Synchronized[int] = mpValue("i", 1)
         self.__toggle: bool = toggle
@@ -103,7 +118,7 @@ class Encoder:
         pin_A: int,
         pin_B: int,
         multiplier: int = 1,
-        function: Any | None = None,
+        function: Callable | None = None,
     ) -> None:
         self.__pin_A: int = pin_A
         self.__pin_B: int = pin_B
@@ -144,7 +159,7 @@ class Encoder:
 
 
 class Sensor:
-    def __init__(self, pin: int, function: Any | None = None) -> None:
+    def __init__(self, pin: int, function: Callable | None = None) -> None:
         self.__pin: int = pin
         self.__value: Synchronized[int] = mpValue("i", 0)
         self.__function: Any | None = function
@@ -326,9 +341,8 @@ class Sorter:
             sleep(0.001)
             if process_state.get_state() == State.Stop:
                 return
-        else:
-            self.__motor.stop()
-            self.__current_position.value = 0
+        self.__motor.stop()
+        self.__current_position.value = 0
         self.__direction.set_value(True)
         self.__motor.set_counter(steps)
         sleep(0.1)
@@ -337,12 +351,11 @@ class Sorter:
             sleep(0.001)
             if process_state.get_state() == State.Stop:
                 return
-        else:
-            self.__current_position.value = self.__max_pos.value = steps - self.__motor.get_counter()
-            self.__motor.stop()
-            for index, i in enumerate(numpy.linspace(0, self.__max_pos.value, self.__num_of_containters + 2, dtype=int)[1:5]):
-                self.__containters_positions[index] = i
-            self.__positioned.value = True
+        self.__current_position.value = self.__max_pos.value = steps - self.__motor.get_counter()
+        self.__motor.stop()
+        for index, i in enumerate(numpy.linspace(0, self.__max_pos.value, self.__num_of_containters + 2, dtype=int)[1:5]):
+            self.__containters_positions[index] = i
+        self.__positioned.value = True
         print(self.__containters_positions[:], self.__current_position.value, self.__positioned.value)
 
     def __go_to_position_thread(self, position: int) -> None:
@@ -414,7 +427,7 @@ class ProcessState:
 
 # Constants
 CHIP: str = "/dev/gpiochip4"
-CAPTURE = 0
+CAPTURE: Literal[0] | str = r"C:\Users\jaros\Downloads\recordd.avi"
 GPIO_ELEMENTS: dict[Identifier, list] = {identifier: [] for identifier in Identifier}
 DETECTION_AREA: tuple[int, int, int, int] = (300, 500, 100, 340)
 POINT_RADIUS: int = 11
@@ -487,7 +500,7 @@ def gpio_value_to_numeric(value: gpioValue) -> int:
         case gpioValue.INACTIVE:
             return 0
         case _:
-            raise Exception("Invalid value!")
+            raise ValueError
 
 
 def gpio_process() -> None:
@@ -554,7 +567,7 @@ def camera_process() -> None:
     def openCV_thread() -> NoReturn:
         nonlocal thread_lock, output_frame
 
-        def detector(contours, color: Color) -> None:
+        def detector(contours: Sequence[cv2.Mat | numpy.ndarray[Any, numpy.dtype[numpy.integer[Any] | numpy.floating[Any]]]], color: Color) -> None:
             current_contours: list = []
             for contour in contours:
                 if cv2.contourArea(contour) > 500:
@@ -600,10 +613,10 @@ def camera_process() -> None:
             with thread_lock:
                 if output_frame is None:
                     continue
-                flag, encodedImage = cv2.imencode(".jpg", output_frame)
+                flag, encoded_image = cv2.imencode(".jpg", output_frame)
                 if not flag:
                     continue
-            yield (b"--frame\r\n" b"Content-Type: image/jpeg\r\n\r\n" + bytearray(encodedImage) + b"\r\n")
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + bytearray(encoded_image) + b"\r\n")
 
     @FLASK_SERVER.route("/")
     def index() -> str:
@@ -648,8 +661,7 @@ def sorter_process() -> None:
                 sorter.go_to_position(sorter.get_element().value)
             while sensor_1.get_value():
                 sleep(0.001)
-            else:
-                sleep(0.75)
+            sleep(0.75)
 
 
 def panel_process() -> None:
@@ -657,17 +669,17 @@ def panel_process() -> None:
         if not emergency_button_1.get_value():
             stop_process()
         if process_state.get_state() == State.Reset:
-            continous_signal_2.set_value(True)
-            continous_signal_4.set_value(False)
+            continous_signal_2.set_value(False)
+            continous_signal_4.set_value(True)
             continous_signal_3.set_value(False)
         if process_state.get_state() == State.Start:
             continous_signal_3.set_value(True)
             continous_signal_2.set_value(False)
             continous_signal_4.set_value(False)
         if process_state.get_state() == State.Stop:
-            continous_signal_4.set_value(True)
+            continous_signal_4.set_value(False)
             continous_signal_3.set_value(False)
-            continous_signal_2.set_value(False)
+            continous_signal_2.set_value(True)
         sleep(0.1)
 
 
@@ -681,7 +693,7 @@ if __name__ == "__main__":
 
     gpio_proc.start()
     robot_proc.start()
-    camera_proc.start()
+    # camera_proc.start()
     sorter_proc.start()
     print_proc.start()
     panel_proc.start()
