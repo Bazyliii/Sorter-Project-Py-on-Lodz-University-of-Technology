@@ -1,12 +1,10 @@
 # !/usr/bin/env python3
-
 import multiprocessing as mp
-import time
 from datetime import timedelta
 from multiprocessing import Process
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from threading import Lock, Thread
-from time import sleep
+from time import sleep, time
 from typing import Any, Callable, Generator, Literal, NoReturn, Sequence
 
 import gpiod.line as gpio
@@ -24,28 +22,23 @@ __email__ = "jaroslawierzbowski2001@gmail.com"
 __status__ = "Work in progress"
 
 
-# TODO: Refactor into single class
 class NonBlockingDelay:
     def __init__(self) -> None:
-        self._timestamp = 0
-        self._delay = 0
+        self.__start_time: float = 0
+        self.__duration: float = 0
 
-    def timeout(self) -> bool:
-        return (millis() - self._timestamp) > self._delay
+    def is_timeout(self) -> bool:
+        return (time() - self.__start_time) * 1000 > self.__duration
 
-    def delay_ms(self, delay: int) -> None:
-        self._timestamp: int = millis()
-        self._delay: int = delay
+    def set_delay(self, duration: float) -> None:
+        self.__start_time: float = time()
+        self.__duration: float = duration
 
-
-def millis() -> int:
-    return int(time.time() * 1000)
-
-
-def delay_ms(delay: int) -> None:
-    t0: int = millis()
-    while (millis() - t0) < delay:
-        pass
+    @staticmethod
+    def delay(duration: float) -> None:
+        start_time: float = time()
+        while (time() - start_time) * 1000 < duration:
+            pass
 
 
 class BasicGPIO:
@@ -55,16 +48,19 @@ class BasicGPIO:
         self.__config: tuple[LineSettings, ...] = tuple()
         GPIO_ELEMENTS.append(self)
 
-    def return_pin(self, pin: int) -> int:
+    def __str__(self) -> str:
+        return str(self.__class__.__name__)
+
+    def get_pin(self, pin: int) -> int:
         return self.__pins[pin]
 
-    def return_config(self) -> dict[int, LineSettings]:
+    def get_config(self) -> dict[int, LineSettings]:
         return {pin: config for pin, config in zip(self.__pins, self.__config)}
 
-    def return_gpio_value(self) -> gpio.Value:
+    def get_gpio_value(self) -> gpio.Value:
         return gpio.Value(self.__value.value)
 
-    def return_numeric_value(self, multiplier: int = 1) -> int:
+    def get_numeric_value(self, multiplier: int = 1) -> int:
         return self.__value.value * multiplier
 
     def set_value(self, value: gpio.Value | int) -> None:
@@ -128,17 +124,23 @@ class Encoder(BasicGPIO):
             ),
         )
         self.__previous_pin_a_state: gpio.Value = gpio.Value.ACTIVE
+        self.__delay: NonBlockingDelay = NonBlockingDelay()
 
-    def return_previous_pin_a_state(self) -> gpio.Value:
+    def get_previous_pin_a_state(self) -> gpio.Value:
         return self.__previous_pin_a_state
 
     def set_previous_pin_a_state(self, value: gpio.Value) -> None:
         self.__previous_pin_a_state = value
 
+    def set_delay(self) -> None:
+        self.__delay.set_delay(10)
 
-# TODO Simplify delay logic
+    def is_timeout(self) -> bool:
+        return self.__delay.is_timeout()
+
+
 class Pulse(BasicGPIO):
-    def __init__(self, pin: int, delay_timeout: int) -> None:
+    def __init__(self, pin: int, hz: float) -> None:
         super().__init__((pin,))
         super().set_config(
             LineSettings(
@@ -148,19 +150,22 @@ class Pulse(BasicGPIO):
         )
         self.__state: Synchronized[bool] = mp.Value("b", False)
         self.__delay: NonBlockingDelay = NonBlockingDelay()
-        self.__delay_timeout: int = delay_timeout
+        self.__hz: float = hz
 
-    def return_state(self) -> bool:
+    def get_state(self) -> bool:
         return self.__state.value
 
     def set_state(self, value: bool) -> None:
         self.__state.value = value
 
-    def return_delay(self) -> NonBlockingDelay:
-        return self.__delay
+    def set_delay(self) -> None:
+        self.__delay.set_delay(500 / self.__hz)
 
-    def return_delay_timeout(self) -> int:
-        return self.__delay_timeout
+    def is_timeout(self) -> bool:
+        return self.__delay.is_timeout()
+
+    def set_pulse_number(self, value: int) -> None:
+        super().set_value(value * 2 + 1)
 
 
 class HardwarePWM:
@@ -186,7 +191,7 @@ class HardwarePWM:
             def __ramp() -> None:
                 for i in linspace(self.__start_hz, self.__max_hz, 100, dtype=float):
                     self.__pwm.change_frequency(i)
-                    sleep(0.1)
+                    sleep(1 / i)
 
             Thread(target=__ramp).start()
         else:
@@ -208,66 +213,78 @@ class HardwarePWM:
 
 GPIO_ELEMENTS: list[BasicGPIO] = []
 
-# button_1: Button = Button(pin=2)
-# button_2: Button = Button(pin=3)
-encoder_1: Encoder = Encoder(pin_a=2, pin_b=3)
+sensor_1: Sensor = Sensor(pin=2)
+emergency_button_1: EmergencyButton = EmergencyButton(pin=3)
+# encoder_1: Encoder = Encoder(pin_a=2, pin_b=3)
 button_3: Button = Button(pin=4)
-pulse_1: Pulse = Pulse(pin=14, delay_timeout=100)
+pulse_1: Pulse = Pulse(pin=14, hz=1)
+pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=0.1, max_hz=10, duty_cycle=50, ramp=True)
 continous_signal_2: ContinousSignal = ContinousSignal(pin=15)
 continous_signal_3: ContinousSignal = ContinousSignal(pin=18)
 
 
-def gpio_process() -> None:
-    config = dict()
+def gpio_process() -> NoReturn:
+    config: dict[int, LineSettings] = dict()
     for element in GPIO_ELEMENTS:
-        config.update(element.return_config())
+        config.update(element.get_config())
     with request_lines("/dev/gpiochip4", config=config) as request:
         while True:
             for element in GPIO_ELEMENTS:
                 match element:
                     case Button() | EmergencyButton() | Sensor():
-                        element.set_value(request.get_value(element.return_pin(0)))
+                        element.set_value(request.get_value(element.get_pin(0)))
                     case ContinousSignal():
-                        request.set_value(element.return_pin(0), element.return_gpio_value())
+                        request.set_value(element.get_pin(0), element.get_gpio_value())
                     case Encoder():
-                        pin_a_state: gpio.Value = request.get_value(element.return_pin(0))
-                        if pin_a_state != element.return_previous_pin_a_state() and pin_a_state == gpio.Value.ACTIVE:
-                            if request.get_value(element.return_pin(1)) == gpio.Value.ACTIVE:
+                        pin_a_state: gpio.Value = request.get_value(element.get_pin(0))
+                        if pin_a_state != element.get_previous_pin_a_state() and pin_a_state == gpio.Value.ACTIVE:
+                            if request.get_value(element.get_pin(1)) == gpio.Value.ACTIVE:
                                 element.set_value(-1)
                             else:
                                 element.set_value(1)
                         else:
                             element.set_value(0)
-                        element.set_previous_pin_a_state(pin_a_state)
+                        if element.is_timeout():
+                            element.set_previous_pin_a_state(pin_a_state)
+                            element.set_delay()
                     case Pulse():
-                        if element.return_state() and element.return_numeric_value() > 0:
-                            request.set_value(element.return_pin(0), gpio.Value(int(element.return_numeric_value() % 2 == 0)))
-                            if element.return_delay().timeout():
-                                element.set_value(element.return_numeric_value() - 1)
-                                element.return_delay().delay_ms(element.return_delay_timeout())
+                        if element.get_state() and element.get_numeric_value() > 0:
+                            request.set_value(element.get_pin(0), gpio.Value(int(element.get_numeric_value() % 2 == 0)))
+                            if element.is_timeout():
+                                element.set_value(element.get_numeric_value() - 1)
+                                element.set_delay()
                         else:
-                            request.set_value(element.return_pin(0), gpio.Value.INACTIVE)
-            print("XDD")
+                            request.set_value(element.get_pin(0), gpio.Value.INACTIVE)
 
 
 def panel_process() -> None:
-    pulse_1.set_value(4000)
-    pulse_1.set_state(True)
+    pass
+
+
+def print_process() -> None:
     while True:
-        # sleep(4)
-        print(button_3.return_numeric_value())
-        sleep(0.1)
+        text: str = ""
+        for element in GPIO_ELEMENTS:
+            text += f"{element}: {element.get_numeric_value()} | "
+        print(text)
+        sleep(0.01)
 
 
 def main() -> None:
-    p1: Process = Process(target=panel_process)
-    p2: Process = Process(target=gpio_process)
+    try:
+        p1: Process = Process(target=panel_process)
+        p2: Process = Process(target=gpio_process)
+        p3: Process = Process(target=print_process)
 
-    p1.start()
-    p2.start()
+        p1.start()
+        p2.start()
+        p3.start()
 
-    p1.join()
-    p2.join()
+        p1.join()
+        p2.join()
+        p3.join()
+    finally:
+        pwm_1.stop()
 
 
 if __name__ == "__main__":
