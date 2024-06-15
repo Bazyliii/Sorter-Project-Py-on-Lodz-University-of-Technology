@@ -1,6 +1,7 @@
 # !/usr/bin/env python3
 import multiprocessing as mp
 from datetime import timedelta
+from enum import Enum
 from multiprocessing import Process
 from multiprocessing.sharedctypes import Synchronized, SynchronizedArray
 from threading import Lock, Thread
@@ -16,7 +17,7 @@ __author__ = "Jarosław Wierzbowski"
 __copyright__ = "Copyright (c) 2024, Lodz University of Technology - Sorter Project"
 __credits__: list[str] = ["Jarosław Wierzbowski", "Mikołaj Ziółkowski", "Krzysztof Kazuba", "Rafał Sobala", "Rafał Arciszewski"]
 __license__ = "MIT"
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 __maintainer__ = "Jarosław Wierzbowski"
 __email__ = "jaroslawierzbowski2001@gmail.com"
 __status__ = "Work in progress"
@@ -41,6 +42,7 @@ class NonBlockingDelay:
             pass
 
 
+# TODO: Add cleanup logic
 class BasicGPIO:
     def __init__(self, pins: tuple[int, ...]) -> None:
         self.__pins: tuple[int, ...] = pins
@@ -177,17 +179,22 @@ class HardwarePWM:
         duty_cycle: float,
         ramp: bool = False,
     ) -> None:
-        self.__channel: int = channel
+        self.__channel: Literal[0, 1] = channel
         self.__start_hz: float = start_hz
         self.__duty_cycle: float = duty_cycle
         self.__ramp: bool = ramp
         self.__max_hz: float = max_hz
         self.__pwm: HwPWM = HwPWM(pwm_channel=self.__channel, hz=self.__start_hz, chip=2)
 
-    def start(self) -> None:
+    def set_state(self, state: bool) -> None:
+        if state:
+            self.__start()
+        else:
+            self.__stop()
+
+    def __start(self) -> None:
         self.__pwm.start(self.__duty_cycle)
         if self.__ramp:
-
             def __ramp() -> None:
                 for i in linspace(self.__start_hz, self.__max_hz, 100, dtype=float):
                     self.__pwm.change_frequency(i)
@@ -197,7 +204,7 @@ class HardwarePWM:
         else:
             self.__pwm.change_frequency(self.__max_hz)
 
-    def stop(self) -> None:
+    def __stop(self) -> None:
         self.__pwm.change_frequency(self.__start_hz)
         self.__pwm.stop()
 
@@ -210,17 +217,48 @@ class HardwarePWM:
         if 0.1 <= hz <= self.__max_hz:
             self.__pwm.change_frequency(hz)
 
+    @staticmethod
+    def cleanup() -> None:
+        HwPWM(0, chip=2, hz=1).stop()
+        HwPWM(1, chip=2, hz=1).stop()
+
+
+class State(Enum):
+    STOP = 0
+    START = 1
+    RESET = 2
+    ERROR = 3
+
+
+class ProgramState:
+    def __init__(self, start_state: State) -> None:
+        self.__state: Synchronized[int] = mp.Value("i", start_state.value)
+
+    def __str__(self) -> str:
+        return str(State(self.__state.value))
+
+    def get_state(self) -> State:
+        return State(self.__state.value)
+
+    def set_state(self, value: State) -> None:
+        self.__state.value = State(value).value
+
+
+program_state: ProgramState = ProgramState(start_state=State.STOP)
+
 
 GPIO_ELEMENTS: list[BasicGPIO] = []
+
 
 sensor_1: Sensor = Sensor(pin=2)
 emergency_button_1: EmergencyButton = EmergencyButton(pin=3)
 # encoder_1: Encoder = Encoder(pin_a=2, pin_b=3)
 button_3: Button = Button(pin=4)
-pulse_1: Pulse = Pulse(pin=14, hz=1)
-pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=0.1, max_hz=10, duty_cycle=50, ramp=True)
+# pulse_1: Pulse = Pulse(pin=14, hz=1)
+pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=1, max_hz=1, duty_cycle=50, ramp=False)
+pwm_2: HardwarePWM = HardwarePWM(channel=1, start_hz=1, max_hz=1, duty_cycle=50, ramp=False)
 continous_signal_2: ContinousSignal = ContinousSignal(pin=15)
-continous_signal_3: ContinousSignal = ContinousSignal(pin=18)
+continous_signal_3: ContinousSignal = ContinousSignal(pin=14)
 
 
 def gpio_process() -> NoReturn:
@@ -258,6 +296,16 @@ def gpio_process() -> NoReturn:
 
 
 def panel_process() -> None:
+    # pwm_1.set_state(True)
+    # pwm_2.set_state(True)
+    # pulse_1.set_pulse_number(5)
+    # pulse_1.set_state(True)
+    continous_signal_2.set_value(True)
+    continous_signal_3.set_value(True)
+    pass
+
+
+def sorter_process() -> None:
     pass
 
 
@@ -266,25 +314,42 @@ def print_process() -> None:
         text: str = ""
         for element in GPIO_ELEMENTS:
             text += f"{element}: {element.get_numeric_value()} | "
-        print(text)
+        print(text, program_state, sep="")
         sleep(0.01)
+
+
+def robot_control_process() -> None:
+    pass
+
+
+def camera_process() -> None:
+    pass
 
 
 def main() -> None:
     try:
-        p1: Process = Process(target=panel_process)
-        p2: Process = Process(target=gpio_process)
+        p1: Process = Process(target=gpio_process)
+        p2: Process = Process(target=panel_process)
         p3: Process = Process(target=print_process)
+        p4: Process = Process(target=robot_control_process)
+        p5: Process = Process(target=sorter_process)
+        p6: Process = Process(target=camera_process)
 
         p1.start()
         p2.start()
         p3.start()
+        p4.start()
+        p5.start()
+        p6.start()
 
         p1.join()
         p2.join()
         p3.join()
+        p4.join()
+        p5.join()
+        p6.join()
     finally:
-        pwm_1.stop()
+        HardwarePWM.cleanup()
 
 
 if __name__ == "__main__":
