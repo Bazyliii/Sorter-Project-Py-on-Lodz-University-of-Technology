@@ -77,6 +77,20 @@ class BasicGPIO:
     def set_config(self, *args: LineSettings) -> None:
         self.__config = args
 
+    @staticmethod
+    def cleanup() -> None:
+        config: dict[int, LineSettings] = dict()
+        for element in GPIO_ELEMENTS:
+            config.update(element.get_config())
+        with request_lines("/dev/gpiochip4", config=config) as request:
+            for element in GPIO_ELEMENTS:
+                match element:
+                    case Button() | EmergencyButton() | Sensor() | ContinousSignal() | Pulse():
+                        request.set_value(element.get_pin(0), gpio.Value.INACTIVE)
+                    case Encoder():
+                        request.set_value(element.get_pin(0), gpio.Value.INACTIVE)
+                        request.set_value(element.get_pin(1), gpio.Value.INACTIVE)
+
 
 class Button(BasicGPIO):
     def __init__(self, pin: int) -> None:
@@ -249,16 +263,11 @@ program_state: ProgramState = ProgramState(start_state=State.STOP)
 
 GPIO_ELEMENTS: list[BasicGPIO] = []
 
-
-sensor_1: Sensor = Sensor(pin=2)
-emergency_button_1: EmergencyButton = EmergencyButton(pin=3)
-# encoder_1: Encoder = Encoder(pin_a=2, pin_b=3)
-button_3: Button = Button(pin=4)
-# pulse_1: Pulse = Pulse(pin=14, hz=1)
-pwm_1: HardwarePWM = HardwarePWM(channel=0, start_hz=1, max_hz=1, duty_cycle=50, ramp=False)
-pwm_2: HardwarePWM = HardwarePWM(channel=1, start_hz=1, max_hz=1, duty_cycle=50, ramp=False)
-continous_signal_2: ContinousSignal = ContinousSignal(pin=15)
-continous_signal_3: ContinousSignal = ContinousSignal(pin=14)
+continous_signal_1: ContinousSignal = ContinousSignal(pin=2)
+pulse_1: Pulse = Pulse(pin=3, hz=1)
+continous_signal_3: ContinousSignal = ContinousSignal(pin=4)
+continous_signal_4: ContinousSignal = ContinousSignal(pin=14)
+continous_signal_5: ContinousSignal = ContinousSignal(pin=15)
 
 
 def gpio_process() -> NoReturn:
@@ -296,13 +305,9 @@ def gpio_process() -> NoReturn:
 
 
 def panel_process() -> None:
-    # pwm_1.set_state(True)
-    # pwm_2.set_state(True)
-    # pulse_1.set_pulse_number(5)
-    # pulse_1.set_state(True)
-    continous_signal_2.set_value(True)
-    continous_signal_3.set_value(True)
-    pass
+    program_state.set_state(State.START)
+    pulse_1.set_pulse_number(5000)
+    pulse_1.set_state(True)
 
 
 def sorter_process() -> None:
@@ -327,14 +332,14 @@ def camera_process() -> None:
 
 
 def main() -> None:
-    try:
-        p1: Process = Process(target=gpio_process)
-        p2: Process = Process(target=panel_process)
-        p3: Process = Process(target=print_process)
-        p4: Process = Process(target=robot_control_process)
-        p5: Process = Process(target=sorter_process)
-        p6: Process = Process(target=camera_process)
+    p1: Process = Process(target=gpio_process)
+    p2: Process = Process(target=panel_process)
+    p3: Process = Process(target=print_process)
+    p4: Process = Process(target=robot_control_process)
+    p5: Process = Process(target=sorter_process)
+    p6: Process = Process(target=camera_process)
 
+    try:
         p1.start()
         p2.start()
         p3.start()
@@ -350,6 +355,8 @@ def main() -> None:
         p6.join()
     finally:
         HardwarePWM.cleanup()
+        program_state.set_state(State.STOP)
+        BasicGPIO.cleanup()
 
 
 if __name__ == "__main__":
